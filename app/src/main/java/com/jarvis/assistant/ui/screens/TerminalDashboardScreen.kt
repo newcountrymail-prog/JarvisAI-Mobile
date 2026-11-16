@@ -443,7 +443,7 @@ fun TerminalDashboardScreen(
             } else {
                 // TAB 1: DISCOVERED TOOLS
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    state.discoveredTools.forEach { tool ->
+                    for (tool in state.discoveredTools) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()

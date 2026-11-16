@@ -12,7 +12,11 @@ enum class RiskLevel(val label: String, val description: String) {
     LEVEL_3_RESTRICTED(
         "Restricted / Blocked",
         "Destructive deletions, credential access, unauthorized scanning, or protected system tampering."
-    )
+    );
+
+    companion object {
+        val LEVEL_1_SAFE: RiskLevel = LEVEL_1_SAFE_AUTO
+    }
 }
 
 enum class TerminalTaskState(val label: String) {
@@ -20,6 +24,7 @@ enum class TerminalTaskState(val label: String) {
     PLANNING("Planning Task"),
     DISCOVERING_TOOLS("Discovering Tools"),
     WAITING_FOR_APPROVAL("Waiting for User Approval"),
+    AWAITING_APPROVAL("Waiting for User Approval"),
     EXECUTING("Executing Command"),
     ANALYZING("Analyzing Terminal Output"),
     RECOVERING("Attempting Error Recovery"),
@@ -37,8 +42,12 @@ data class DiscoveredTool(
     val version: String? = null,
     val isInstalled: Boolean = false,
     val riskLevel: RiskLevel = RiskLevel.LEVEL_1_SAFE_AUTO,
-    val supportedOperations: List<String> = emptyList()
-)
+    val supportedOperations: List<String> = emptyList(),
+    val binaryPath: String? = null
+) {
+    val isAvailable: Boolean get() = isInstalled
+    val pkgName: String get() = packageName
+}
 
 data class TerminalCommand(
     val rawCommand: String,
@@ -68,7 +77,8 @@ data class ExecutionPlan(
     val requiredTools: List<DiscoveredTool>,
     val commands: List<TerminalCommand>,
     val estimatedDurationSec: Int,
-    val highestRiskLevel: RiskLevel
+    val highestRiskLevel: RiskLevel,
+    val userIntent: String = taskTitle
 )
 
 data class TerminalDashboardState(
@@ -84,5 +94,10 @@ data class TerminalDashboardState(
     val isTermuxInstalled: Boolean = true,
     val isTermuxPermissionGranted: Boolean = true,
     val pendingApprovalCommand: TerminalCommand? = null,
-    val verificationReport: String? = null
-)
+    val verificationReport: String? = null,
+    val discoveredTools: List<DiscoveredTool> = emptyList(),
+    val activePlan: ExecutionPlan? = null
+) {
+    val consoleLogs: List<String> get() = executionLog
+    val hasRunCommandPermission: Boolean get() = isTermuxPermissionGranted
+}
