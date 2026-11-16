@@ -297,11 +297,7 @@ class CustomOpenAiProvider(
 
         val window = history.takeLast(10)
         for (msg in window) {
-            val role = when (msg.sender) {
-                MessageSender.USER -> "user"
-                MessageSender.JARVIS -> "assistant"
-                MessageSender.SYSTEM -> "system"
-            }
+            val role = if (msg.sender == MessageSender.USER) "user" else "assistant"
             messages.put(JSONObject().apply {
                 put("role", role)
                 put("content", msg.text)
