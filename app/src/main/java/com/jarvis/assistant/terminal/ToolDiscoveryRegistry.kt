@@ -1,6 +1,11 @@
 package com.jarvis.assistant.terminal
 
-class ToolDiscoveryRegistry {
+import android.content.Context
+
+class ToolDiscoveryRegistry(
+    private val context: Context? = null,
+    private val bridge: TermuxBridge? = null
+) {
 
     private val toolCatalogue = listOf(
         DiscoveredTool(
@@ -122,13 +127,14 @@ class ToolDiscoveryRegistry {
         }
     }
 
-    suspend fun auditInstalledTools(bridge: TermuxBridge): List<DiscoveredTool> {
+    suspend fun auditInstalledTools(bridgeInstance: TermuxBridge? = bridge): List<DiscoveredTool> {
+        val b = bridgeInstance ?: return toolCatalogue
         return toolCatalogue.map { tool ->
-            val checkRes = bridge.executeShellCommand("which ${tool.binaryName}", timeoutSec = 5)
+            val checkRes = b.executeShellCommand("which ${tool.binaryName}", timeoutSec = 5)
             val isInstalled = checkRes.isSuccess && checkRes.stdout.isNotBlank()
             var ver: String? = null
             if (isInstalled) {
-                val verRes = bridge.executeShellCommand("${tool.binaryName} --version", timeoutSec = 5)
+                val verRes = b.executeShellCommand("${tool.binaryName} --version", timeoutSec = 5)
                 if (verRes.isSuccess) {
                     ver = verRes.stdout.lines().firstOrNull()?.take(40)
                 }

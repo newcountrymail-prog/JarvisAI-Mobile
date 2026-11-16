@@ -291,4 +291,12 @@ class JarvisUnitTest {
         assertTrue(prompt.contains("NEURAL CORE MEMORIES"))
         assertTrue(prompt.contains("Address user as Master."))
     }
+
+    @Test
+    fun testToolDiscoveryRegistryConstructors() {
+        val reg1 = com.jarvis.assistant.terminal.ToolDiscoveryRegistry()
+        assertTrue(reg1.getAllTools().isNotEmpty())
+        val reg2 = com.jarvis.assistant.terminal.ToolDiscoveryRegistry(null, null)
+        assertTrue(reg2.getAllTools().isNotEmpty())
+    }
 }
