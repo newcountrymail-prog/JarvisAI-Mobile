@@ -23,10 +23,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,6 +38,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.jarvis.assistant.ai.PersonaPromptBuilder
+import com.jarvis.assistant.automation.JarvisIntent
+import com.jarvis.assistant.automation.JarvisIntentParser
 import com.jarvis.assistant.data.model.AssistantState
 import com.jarvis.assistant.data.model.ChatMessage
 import com.jarvis.assistant.data.model.ChatMode
@@ -58,6 +61,7 @@ import com.jarvis.assistant.ui.screens.UpdatesScreen
 import com.jarvis.assistant.ui.theme.JarvisTheme
 import com.jarvis.assistant.ui.theme.SunsetBackground
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -97,25 +101,23 @@ class MainActivity : ComponentActivity() {
             var voiceTranscript by remember { mutableStateOf("") }
             var voiceAiResponse by remember { mutableStateOf("") }
 
-            // Task HUD State
-            var taskHudState by remember { mutableStateOf(TaskHudState()) }
+            // Task HUD State connected to real execution engine
+            val taskHudState by app.taskEngine.hudState.collectAsState()
 
-            // Chat Messages
-            val messages = remember {
-                mutableStateListOf(
-                    ChatMessage(
-                        id = UUID.randomUUID().toString(),
-                        sender = MessageSender.JARVIS,
-                        text = "Good day, Master. JARVIS neural core is calibrated and awaiting your command. How may I assist your workflow today?",
-                        timestamp = System.currentTimeMillis() - 60000L
-                    )
-                )
-            }
+            // Real Room-backed Chat Messages
+            val chatMessages by app.chatRepository.getMessagesFlow().collectAsState(initial = emptyList())
             var isThinking by remember { mutableStateOf(false) }
 
-            // Initial refresh of atmospheric weather telemetry
+            // Initial auto-seed and weather refresh
             LaunchedEffect(Unit) {
                 app.weatherRepository.refreshWeather()
+                val existingMessages = app.chatRepository.getMessagesFlow().firstOrNull()
+                if (existingMessages.isNullOrEmpty()) {
+                    app.chatRepository.addMessage(
+                        sender = MessageSender.JARVIS,
+                        text = "Good day, Master. JARVIS neural core is calibrated and awaiting your command. How may I assist your workflow today?"
+                    )
+                }
             }
 
             // Sync Overlay Service
@@ -146,12 +148,170 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // Voice command executor
+            fun processVoiceCommand(prompt: String) {
+                val intent = JarvisIntentParser.parse(prompt)
+                scope.launch {
+                    app.chatRepository.addMessage(
+                        sender = MessageSender.USER,
+                        text = prompt,
+                        mode = ChatMode.JARVIS
+                    )
+                    when (intent) {
+                        is JarvisIntent.WeatherQuery -> {
+                            app.weatherRepository.refreshWeather()
+                            val w = app.weatherRepository.weatherState.value
+                            val reply = "Atmosphere report for ${w.location}: ${w.temperature}°C, ${w.condition}. Humidity at ${w.humidity}%."
+                            voiceAiResponse = reply
+                            app.chatRepository.addMessage(MessageSender.JARVIS, reply)
+                            if (!silentExecution) {
+                                app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
+                            }
+                            delay(1200)
+                            assistantState = AssistantState.IDLE
+                        }
+                        is JarvisIntent.DeviceTelemetryAction -> {
+                            val t = app.automationController.getDeviceTelemetry()
+                            val reply = when (intent.target) {
+                                "battery" -> "Battery is currently at ${t.batteryLevel}% (${if (t.isCharging) "Charging" else "Discharging"})."
+                                "network" -> "Network interface connected via ${t.networkName}."
+                                "settings" -> {
+                                    app.automationController.openSettings()
+                                    "Opening system settings panel, Master."
+                                }
+                                else -> "Battery is at ${t.batteryLevel}%, network connected to ${t.networkName}."
+                            }
+                            voiceAiResponse = reply
+                            app.chatRepository.addMessage(MessageSender.JARVIS, reply)
+                            if (!silentExecution) {
+                                app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
+                            }
+                            delay(1200)
+                            assistantState = AssistantState.IDLE
+                        }
+                        is JarvisIntent.CommunicationWhatsApp,
+                        is JarvisIntent.CommunicationCall,
+                        is JarvisIntent.YouTubeAction,
+                        is JarvisIntent.SpotifyAction -> {
+                            app.taskEngine.executeIntent(intent) { feedback ->
+                                voiceAiResponse = feedback
+                                scope.launch {
+                                    app.chatRepository.addMessage(MessageSender.JARVIS, feedback)
+                                    if (!silentExecution) {
+                                        app.voiceEngine.speak(feedback, personaConfig.speakingSpeed)
+                                    }
+                                }
+                            }
+                            assistantState = AssistantState.EXECUTING_TASK
+                        }
+                        is JarvisIntent.MemoryRecall -> {
+                            val mems = app.memoryRepository.searchMemories(intent.query)
+                            val reply = if (mems.isNotEmpty()) {
+                                "Recalled from neural memory: ${mems.first().title} - ${mems.first().content}"
+                            } else {
+                                "No matching neural memories found for '${intent.query}'."
+                            }
+                            voiceAiResponse = reply
+                            app.chatRepository.addMessage(MessageSender.JARVIS, reply)
+                            if (!silentExecution) {
+                                app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
+                            }
+                            delay(1200)
+                            assistantState = AssistantState.IDLE
+                        }
+                        is JarvisIntent.MemorySave -> {
+                            app.memoryRepository.addMemory("Voice Note", intent.fact, "Personal")
+                            val reply = "Saved to neural core: ${intent.fact}"
+                            voiceAiResponse = reply
+                            app.chatRepository.addMessage(MessageSender.JARVIS, reply)
+                            if (!silentExecution) {
+                                app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
+                            }
+                            delay(1200)
+                            assistantState = AssistantState.IDLE
+                        }
+                        else -> {
+                            if (geminiApiKey.isBlank()) {
+                                val reply = "Gemini API key is not configured. Please enter your API key in Settings & Intelligence to activate live AI conversation."
+                                voiceAiResponse = reply
+                                app.chatRepository.addMessage(MessageSender.JARVIS, reply)
+                                if (!silentExecution) {
+                                    app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
+                                }
+                                delay(1200)
+                                assistantState = AssistantState.IDLE
+                            } else {
+                                val activeMemories = app.memoryRepository.memories.value
+                                val systemPrompt = PersonaPromptBuilder.buildSystemInstruction(userName, personaConfig, activeMemories)
+                                val result = app.geminiAiProvider.generateResponse(
+                                    prompt = prompt,
+                                    conversationHistory = emptyList(),
+                                    systemInstruction = systemPrompt,
+                                    model = geminiModel,
+                                    apiKey = geminiApiKey
+                                )
+                                val reply = result.getOrNull()?.text ?: "AI communication failed: ${result.exceptionOrNull()?.message}"
+                                voiceAiResponse = reply
+                                app.chatRepository.addMessage(MessageSender.JARVIS, reply)
+                                if (!silentExecution) {
+                                    app.voiceEngine.speak(reply.take(150), personaConfig.speakingSpeed)
+                                }
+                                delay(1200)
+                                assistantState = AssistantState.IDLE
+                            }
+                        }
+                    }
+                }
+            }
+
             // Audio Permission Launcher
             val recordAudioLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.RequestPermission()
             ) { granted ->
                 if (granted) {
+                    voiceTranscript = ""
+                    voiceAiResponse = ""
+                    showVoiceSheet = true
+                    assistantState = AssistantState.LISTENING
                     app.voiceEngine.playActivationChime()
+                    app.voiceEngine.startListening(currentLanguage)
+                } else {
+                    Toast.makeText(this@MainActivity, "Microphone permission required for voice interaction.", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            // Wire Voice Engine Listener
+            DisposableEffect(Unit) {
+                app.voiceEngine.onTranscriptionResult = { text ->
+                    voiceTranscript = text
+                }
+                app.voiceEngine.onListeningStarted = {
+                    assistantState = AssistantState.LISTENING
+                }
+                app.voiceEngine.onListeningEnded = {
+                    if (voiceTranscript.isNotBlank() && assistantState == AssistantState.LISTENING) {
+                        assistantState = AssistantState.PROCESSING
+                        processVoiceCommand(voiceTranscript)
+                    }
+                }
+                app.voiceEngine.onSpeechStarted = {
+                    assistantState = AssistantState.SPEAKING
+                }
+                app.voiceEngine.onSpeechCompleted = {
+                    assistantState = AssistantState.IDLE
+                }
+                app.voiceEngine.onError = { error ->
+                    voiceAiResponse = error
+                    assistantState = AssistantState.IDLE
+                }
+
+                onDispose {
+                    app.voiceEngine.onTranscriptionResult = null
+                    app.voiceEngine.onListeningStarted = null
+                    app.voiceEngine.onListeningEnded = null
+                    app.voiceEngine.onSpeechStarted = null
+                    app.voiceEngine.onSpeechCompleted = null
+                    app.voiceEngine.onError = null
                 }
             }
 
@@ -200,74 +360,198 @@ class MainActivity : ComponentActivity() {
 
                         composable(NavDestination.CHAT.route) {
                             ChatScreen(
-                                messages = messages,
+                                messages = chatMessages,
                                 isThinking = isThinking,
                                 onSendMessage = { text, mode ->
-                                    // 1. Add user message
-                                    val userMsg = ChatMessage(
-                                        id = UUID.randomUUID().toString(),
-                                        sender = MessageSender.USER,
-                                        text = text,
-                                        mode = mode
-                                    )
-                                    messages.add(userMsg)
-                                    isThinking = true
-                                    assistantState = AssistantState.THINKING
-
-                                    // 2. Generate simulated intelligent AI response
                                     scope.launch {
-                                        delay(900)
-                                        isThinking = false
-                                        assistantState = AssistantState.SPEAKING
-
-                                        val replyText = generateAiResponse(text, mode, userName)
-                                        val aiMsg = ChatMessage(
-                                            id = UUID.randomUUID().toString(),
-                                            sender = MessageSender.JARVIS,
-                                            text = replyText,
-                                            mode = mode,
-                                            isCode = mode == ChatMode.CODE
+                                        app.chatRepository.addMessage(
+                                            sender = MessageSender.USER,
+                                            text = text,
+                                            mode = mode
                                         )
-                                        messages.add(aiMsg)
+                                        isThinking = true
+                                        assistantState = AssistantState.THINKING
 
-                                        if (!silentExecution) {
-                                            val vocalSnippet = if (mode == ChatMode.CODE) "Code implementation prepared, Master." else replyText.take(120)
-                                            app.voiceEngine.speak(vocalSnippet, personaConfig.speakingSpeed)
+                                        val intent = JarvisIntentParser.parse(text)
+                                        when (intent) {
+                                            is JarvisIntent.WeatherQuery -> {
+                                                app.weatherRepository.refreshWeather()
+                                                val w = app.weatherRepository.weatherState.value
+                                                val reply = "Atmospheric telemetry for ${w.location}: ${w.temperature}°C, ${w.condition}. Humidity at ${w.humidity}%, pressure ${w.pressure} hPa, wind speed ${w.windSpeed} km/h."
+                                                app.chatRepository.addMessage(MessageSender.JARVIS, reply, mode = mode)
+                                                if (!silentExecution) {
+                                                    app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
+                                                }
+                                                isThinking = false
+                                                assistantState = AssistantState.IDLE
+                                            }
+                                            is JarvisIntent.DeviceTelemetryAction -> {
+                                                val t = app.automationController.getDeviceTelemetry()
+                                                val reply = when (intent.target) {
+                                                    "battery" -> "Battery is at ${t.batteryLevel}% (${if (t.isCharging) "Charging via AC/USB" else "Discharging"}). Battery Health: ${t.batteryHealth}."
+                                                    "network" -> "Network interface: ${t.networkName} (Connected: ${t.isNetworkConnected})."
+                                                    "settings" -> {
+                                                        app.automationController.openSettings()
+                                                        "Opening system settings panel, Master."
+                                                    }
+                                                    else -> "System telemetry: Battery ${t.batteryLevel}%, Network ${t.networkName}."
+                                                }
+                                                app.chatRepository.addMessage(MessageSender.JARVIS, reply, mode = mode)
+                                                if (!silentExecution) {
+                                                    app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
+                                                }
+                                                isThinking = false
+                                                assistantState = AssistantState.IDLE
+                                            }
+                                            is JarvisIntent.MemoryRecall -> {
+                                                val mems = app.memoryRepository.searchMemories(intent.query)
+                                                val reply = if (mems.isNotEmpty()) {
+                                                    "Recalled ${mems.size} relevant memory records:\n" + mems.take(4).joinToString("\n") { "• ${it.title}: ${it.content}" }
+                                                } else {
+                                                    "No specific neural memories matching '${intent.query}' found in core storage."
+                                                }
+                                                app.chatRepository.addMessage(MessageSender.JARVIS, reply, mode = mode)
+                                                if (!silentExecution) {
+                                                    app.voiceEngine.speak(reply.take(120), personaConfig.speakingSpeed)
+                                                }
+                                                isThinking = false
+                                                assistantState = AssistantState.IDLE
+                                            }
+                                            is JarvisIntent.MemorySave -> {
+                                                app.memoryRepository.addMemory("User Fact", intent.fact, "Personal")
+                                                val reply = "Affirmative. Stored in neural memory: \"${intent.fact}\""
+                                                app.chatRepository.addMessage(MessageSender.JARVIS, reply, mode = mode)
+                                                if (!silentExecution) {
+                                                    app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
+                                                }
+                                                isThinking = false
+                                                assistantState = AssistantState.IDLE
+                                            }
+                                            is JarvisIntent.CommunicationWhatsApp,
+                                            is JarvisIntent.CommunicationCall,
+                                            is JarvisIntent.YouTubeAction,
+                                            is JarvisIntent.SpotifyAction -> {
+                                                val initMsgId = app.chatRepository.addMessage(
+                                                    MessageSender.JARVIS,
+                                                    "Initiating verified execution protocol for command...",
+                                                    mode = mode
+                                                )
+                                                app.taskEngine.executeIntent(intent) { feedback ->
+                                                    scope.launch {
+                                                        app.chatRepository.updateMessageStream(initMsgId, feedback, isStreaming = false)
+                                                        if (!silentExecution) {
+                                                            app.voiceEngine.speak(feedback, personaConfig.speakingSpeed)
+                                                        }
+                                                    }
+                                                }
+                                                isThinking = false
+                                                assistantState = AssistantState.IDLE
+                                            }
+                                            is JarvisIntent.OpenApp -> {
+                                                val opened = app.automationController.openApp(intent.appName)
+                                                val reply = if (opened) "Launching ${intent.appName}." else "Could not locate application package for ${intent.appName}."
+                                                app.chatRepository.addMessage(MessageSender.JARVIS, reply, mode = mode)
+                                                if (!silentExecution) {
+                                                    app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
+                                                }
+                                                isThinking = false
+                                                assistantState = AssistantState.IDLE
+                                            }
+                                            is JarvisIntent.GeneralAiConversation -> {
+                                                if (geminiApiKey.isBlank()) {
+                                                    val notice = "Gemini API key is not configured. Please open Settings & Intelligence (top right or bottom bar) and enter your Gemini API key to activate cloud neural intelligence. Device automation and local telemetry tools remain fully operational."
+                                                    app.chatRepository.addMessage(MessageSender.JARVIS, notice, mode = mode)
+                                                    if (!silentExecution) {
+                                                        app.voiceEngine.speak("Gemini API key required for cloud generative intelligence. Please configure in settings.", personaConfig.speakingSpeed)
+                                                    }
+                                                    isThinking = false
+                                                    assistantState = AssistantState.IDLE
+                                                } else {
+                                                    val aiMsgId = app.chatRepository.addMessage(
+                                                        sender = MessageSender.JARVIS,
+                                                        text = "Thinking...",
+                                                        mode = mode,
+                                                        isCode = mode == ChatMode.CODE
+                                                    )
+                                                    val activeMemories = app.memoryRepository.memories.value
+                                                    val systemInstruction = PersonaPromptBuilder.buildSystemInstruction(userName, personaConfig, activeMemories)
+                                                    val history = app.chatRepository.getMessagesFlow().firstOrNull() ?: emptyList()
+
+                                                    val sb = StringBuilder()
+                                                    app.geminiAiProvider.streamResponse(
+                                                        prompt = text,
+                                                        conversationHistory = history.takeLast(10),
+                                                        systemInstruction = systemInstruction,
+                                                        model = geminiModel,
+                                                        apiKey = geminiApiKey
+                                                    ).collect { chunk ->
+                                                        isThinking = false
+                                                        assistantState = AssistantState.SPEAKING
+                                                        if (chunk.error != null) {
+                                                            sb.append("\n[Error: ${chunk.error}]")
+                                                            app.chatRepository.updateMessageStream(aiMsgId, sb.toString(), false)
+                                                        } else {
+                                                            sb.append(chunk.textDelta)
+                                                            app.chatRepository.updateMessageStream(aiMsgId, sb.toString(), !chunk.isComplete)
+                                                        }
+                                                        if (chunk.isComplete) {
+                                                            val finalContent = sb.toString().trim()
+                                                            app.chatRepository.updateMessageStream(aiMsgId, finalContent, false)
+                                                            if (!silentExecution) {
+                                                                val speakText = if (mode == ChatMode.CODE) "Code implementation prepared, Master." else finalContent.take(150)
+                                                                app.voiceEngine.speak(speakText, personaConfig.speakingSpeed)
+                                                            }
+                                                            assistantState = AssistantState.IDLE
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
-
-                                        delay(1500)
-                                        assistantState = AssistantState.IDLE
                                     }
                                 },
                                 onNewChat = {
-                                    messages.clear()
-                                    messages.add(
-                                        ChatMessage(
-                                            id = UUID.randomUUID().toString(),
+                                    scope.launch {
+                                        app.chatRepository.clearHistory()
+                                        app.chatRepository.addMessage(
                                             sender = MessageSender.JARVIS,
                                             text = "New neural session initialized. Standing by for instructions.",
-                                            timestamp = System.currentTimeMillis()
+                                            mode = ChatMode.JARVIS
                                         )
-                                    )
+                                    }
                                 },
-                                onDeleteMessage = { id -> messages.removeAll { it.id == id } },
+                                onDeleteMessage = { id ->
+                                    scope.launch { app.chatRepository.deleteMessage(id) }
+                                },
                                 onRegenerateResponse = {
-                                    if (messages.isNotEmpty()) {
-                                        val lastUserMsg = messages.lastOrNull { it.sender == MessageSender.USER }
-                                        if (lastUserMsg != null) {
+                                    scope.launch {
+                                        val history = app.chatRepository.getMessagesFlow().firstOrNull() ?: emptyList()
+                                        val lastUserMsg = history.lastOrNull { it.sender == MessageSender.USER }
+                                        if (lastUserMsg != null && geminiApiKey.isNotBlank()) {
                                             isThinking = true
-                                            scope.launch {
-                                                delay(800)
+                                            val aiMsgId = app.chatRepository.addMessage(
+                                                sender = MessageSender.JARVIS,
+                                                text = "Regenerating...",
+                                                mode = lastUserMsg.mode,
+                                                isCode = lastUserMsg.mode == ChatMode.CODE
+                                            )
+                                            val activeMemories = app.memoryRepository.memories.value
+                                            val systemInstruction = PersonaPromptBuilder.buildSystemInstruction(userName, personaConfig, activeMemories)
+                                            val sb = StringBuilder()
+                                            app.geminiAiProvider.streamResponse(
+                                                prompt = lastUserMsg.text,
+                                                conversationHistory = history.dropLast(1).takeLast(10),
+                                                systemInstruction = systemInstruction,
+                                                model = geminiModel,
+                                                apiKey = geminiApiKey
+                                            ).collect { chunk ->
                                                 isThinking = false
-                                                val regenerated = "Regenerated insight: ${generateAiResponse(lastUserMsg.text, lastUserMsg.mode, userName)}"
-                                                messages.add(
-                                                    ChatMessage(
-                                                        id = UUID.randomUUID().toString(),
-                                                        sender = MessageSender.JARVIS,
-                                                        text = regenerated,
-                                                        mode = lastUserMsg.mode
-                                                    )
-                                                )
+                                                if (chunk.error != null) {
+                                                    sb.append("\n[Error: ${chunk.error}]")
+                                                    app.chatRepository.updateMessageStream(aiMsgId, sb.toString(), false)
+                                                } else {
+                                                    sb.append(chunk.textDelta)
+                                                    app.chatRepository.updateMessageStream(aiMsgId, sb.toString(), !chunk.isComplete)
+                                                }
                                             }
                                         }
                                     }
@@ -276,9 +560,16 @@ class MainActivity : ComponentActivity() {
                                     app.voiceEngine.speak(text, personaConfig.speakingSpeed)
                                 },
                                 onVoiceMicTapped = {
-                                    showVoiceSheet = true
-                                    assistantState = AssistantState.LISTENING
-                                    app.voiceEngine.playActivationChime()
+                                    if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                                        recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    } else {
+                                        voiceTranscript = ""
+                                        voiceAiResponse = ""
+                                        showVoiceSheet = true
+                                        assistantState = AssistantState.LISTENING
+                                        app.voiceEngine.playActivationChime()
+                                        app.voiceEngine.startListening(currentLanguage)
+                                    }
                                 }
                             )
                         }
@@ -311,7 +602,9 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onThemeUpdated = { newTheme -> scope.launch { app.preferences.setThemePreset(newTheme) } },
                                 onOverlayConfigUpdated = { newOverlay -> scope.launch { app.preferences.updateOverlayConfig(newOverlay) } },
-                                onClearChatHistory = { messages.clear() }
+                                onClearChatHistory = {
+                                    scope.launch { app.chatRepository.clearHistory() }
+                                }
                             )
                         }
 
@@ -336,10 +629,14 @@ class MainActivity : ComponentActivity() {
                         onMicTapped = {
                             if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                                 recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            } else {
+                                voiceTranscript = ""
+                                voiceAiResponse = ""
+                                showVoiceSheet = true
+                                assistantState = AssistantState.LISTENING
+                                app.voiceEngine.playActivationChime()
+                                app.voiceEngine.startListening(currentLanguage)
                             }
-                            showVoiceSheet = true
-                            assistantState = AssistantState.LISTENING
-                            app.voiceEngine.playActivationChime()
                         },
                         modifier = Modifier.align(Alignment.BottomCenter)
                     )
@@ -348,7 +645,7 @@ class MainActivity : ComponentActivity() {
                     TaskHudOverlay(
                         state = taskHudState,
                         onCancelTask = {
-                            taskHudState = taskHudState.copy(isActive = false, status = TaskStatus.PAUSED)
+                            app.taskEngine.dismissHud()
                             assistantState = AssistantState.IDLE
                         },
                         modifier = Modifier
@@ -365,83 +662,16 @@ class MainActivity : ComponentActivity() {
                             onDismiss = {
                                 showVoiceSheet = false
                                 assistantState = AssistantState.IDLE
+                                app.voiceEngine.stopListening()
                                 app.voiceEngine.stop()
                             },
                             onQuickPromptSelected = { prompt ->
                                 voiceTranscript = prompt
-                                assistantState = AssistantState.PROCESSING
-                                scope.launch {
-                                    delay(700)
-                                    assistantState = AssistantState.SPEAKING
-                                    voiceAiResponse = executeVoicePromptAction(prompt) { hud ->
-                                        taskHudState = hud
-                                    }
-                                    if (!silentExecution) {
-                                        app.voiceEngine.speak(voiceAiResponse, personaConfig.speakingSpeed)
-                                    }
-                                    delay(1800)
-                                    assistantState = AssistantState.IDLE
-                                }
+                                processVoiceCommand(prompt)
                             }
                         )
                     }
                 }
-            }
-        }
-    }
-
-    private fun generateAiResponse(prompt: String, mode: ChatMode, userName: String): String {
-        val lower = prompt.lowercase()
-        return when {
-            mode == ChatMode.CODE -> {
-                "```kotlin\n// Architecture execution for: ${prompt.take(30)}\nclass JarvisNeuralPipeline {\n    fun execute() {\n        println(\"Executing verified task with Jetpack Compose 3D Canvas...\")\n    }\n}\n```"
-            }
-            lower.contains("battery") || lower.contains("health") || lower.contains("telemetry") -> {
-                val t = app.automationController.getDeviceTelemetry()
-                "Telemetry report for $userName: Battery is at ${t.batteryLevel}% (${if (t.isCharging) "Charging" else "Discharging"}). Network interface connected via ${t.networkName}."
-            }
-            lower.contains("memory") || lower.contains("recall") -> {
-                val mems = app.memoryRepository.memories.value
-                "Recalled ${mems.size} core memory entries: 1) ${mems.firstOrNull()?.content ?: "Master protocol active."}"
-            }
-            lower.contains("whatsapp") -> {
-                "WhatsApp alias resolver verified: 'Sarah' maps to lead contact (+15550199). Would you like me to initiate the confirmed transmission?"
-            }
-            else -> {
-                "Understood, $userName. I have logged your request. Atmospheric and neural systems are calibrated at 100% efficiency."
-            }
-        }
-    }
-
-    private fun executeVoicePromptAction(prompt: String, onHudUpdate: (TaskHudState) -> Unit): String {
-        val lower = prompt.lowercase()
-        return when {
-            lower.contains("battery") -> {
-                val telemetry = app.automationController.getDeviceTelemetry()
-                "Battery is currently at ${telemetry.batteryLevel}%, connected to ${telemetry.networkName}."
-            }
-            lower.contains("whatsapp") -> {
-                onHudUpdate(
-                    TaskHudState(
-                        taskName = "WhatsApp Comms: Sarah",
-                        currentOperation = "Step 2: Resolving alias and inspecting accessibility tree...",
-                        completedSteps = listOf("Contact alias resolved (+15550199)", "Permissions verified"),
-                        currentStepIndex = 3,
-                        percentage = 75,
-                        status = TaskStatus.EXECUTING,
-                        needsVerification = true,
-                        isActive = true
-                    )
-                )
-                app.automationController.sendWhatsAppMessage("+15550199", "Voice dispatch from Master.")
-                "Opening WhatsApp for verified transmission to Sarah."
-            }
-            lower.contains("spotify") -> {
-                app.automationController.searchSpotify("Synthwave Focus")
-                "Streaming synthwave focus track on Spotify."
-            }
-            else -> {
-                "Processing vocal command: $prompt. Neural core updated."
             }
         }
     }

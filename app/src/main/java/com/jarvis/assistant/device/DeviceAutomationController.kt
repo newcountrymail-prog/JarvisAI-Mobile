@@ -4,10 +4,12 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.BatteryManager
+import android.provider.ContactsContract
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import java.net.URLEncoder
@@ -29,19 +31,78 @@ data class DeviceTelemetry(
 
 class DeviceAutomationController(private val context: Context) {
 
-    // Pre-configured known contact aliases as specified in WhatsApp & Phone specifications
+    // Pre-configured known contact aliases as fallback / known mappings
     private val contactAliases = listOf(
         ContactMatch("Sarah Jenkins", "Sarah", "+15550199", isWhatsAppAvailable = true),
+        ContactMatch("Amit Sharma", "Amit bhaiya", "+919876543210", isWhatsAppAvailable = true),
         ContactMatch("Dev Team Core", "Dev Team", "+15550142", isWhatsAppAvailable = true),
         ContactMatch("Dr. Marcus Vance", "Doctor", "+15550188", isWhatsAppAvailable = true),
         ContactMatch("Elena Rostova", "Elena", "+15550177", isWhatsAppAvailable = true)
     )
 
+    /**
+     * Searches Android Contacts Provider with READ_CONTACTS permission,
+     * with fallback to saved alias table.
+     */
     fun resolveContact(query: String): ContactMatch? {
         val clean = query.trim().lowercase()
-        return contactAliases.firstOrNull {
-            it.alias.lowercase() == clean || it.name.lowercase().contains(clean)
+
+        // 1. Try querying real Android Contacts ContentProvider if permission is granted
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
+            val phoneContacts = queryAndroidContacts(clean)
+            if (phoneContacts.isNotEmpty()) {
+                return phoneContacts.first()
+            }
         }
+
+        // 2. Fallback to Alias Matcher
+        return contactAliases.firstOrNull {
+            it.alias.lowercase() == clean ||
+            it.name.lowercase().contains(clean) ||
+            clean.contains(it.alias.lowercase())
+        }
+    }
+
+    fun searchAllMatchingContacts(query: String): List<ContactMatch> {
+        val list = mutableListOf<ContactMatch>()
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
+            list.addAll(queryAndroidContacts(query))
+        }
+        val clean = query.trim().lowercase()
+        val aliasMatches = contactAliases.filter {
+            it.alias.lowercase().contains(clean) || it.name.lowercase().contains(clean)
+        }
+        list.addAll(aliasMatches)
+        return list.distinctBy { it.phoneNumber }
+    }
+
+    private fun queryAndroidContacts(query: String): List<ContactMatch> {
+        val results = mutableListOf<ContactMatch>()
+        val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER
+        )
+        val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
+        val selectionArgs = arrayOf("%$query%")
+
+        try {
+            val cursor: Cursor? = context.contentResolver.query(uri, projection, selection, selectionArgs, null)
+            cursor?.use {
+                val nameIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val numberIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (it.moveToNext() && results.size < 5) {
+                    val name = if (nameIndex >= 0) it.getString(nameIndex) ?: "" else ""
+                    val number = if (numberIndex >= 0) it.getString(numberIndex) ?: "" else ""
+                    if (name.isNotBlank() && number.isNotBlank()) {
+                        results.add(ContactMatch(name, name, number, isWhatsAppAvailable = true))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return results
     }
 
     fun getAllKnownContacts(): List<ContactMatch> = contactAliases
@@ -73,7 +134,6 @@ class DeviceAutomationController(private val context: Context) {
             context.startActivity(intent)
             true
         } catch (e: Exception) {
-            // Fallback to browser WhatsApp Web
             val webIntent = Intent(Intent.ACTION_VIEW, uri).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }

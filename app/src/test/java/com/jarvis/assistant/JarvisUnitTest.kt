@@ -1,11 +1,16 @@
 package com.jarvis.assistant
 
+import com.jarvis.assistant.ai.PersonaPromptBuilder
+import com.jarvis.assistant.automation.JarvisIntent
+import com.jarvis.assistant.automation.JarvisIntentParser
+import com.jarvis.assistant.data.model.AiPersonaConfig
 import com.jarvis.assistant.data.model.AssistantState
 import com.jarvis.assistant.data.model.ChatMessage
 import com.jarvis.assistant.data.model.ChatMode
 import com.jarvis.assistant.data.model.MemoryCategory
 import com.jarvis.assistant.data.model.MessageSender
 import com.jarvis.assistant.data.model.NeuralMemory
+import com.jarvis.assistant.data.model.PersonalityType
 import com.jarvis.assistant.data.model.TaskHudState
 import com.jarvis.assistant.data.model.TaskStatus
 import com.jarvis.assistant.data.model.ThemePreset
@@ -79,5 +84,75 @@ class JarvisUnitTest {
         assertEquals("Dark Theme", ThemePreset.DARK.displayName)
         assertEquals("Light Theme", ThemePreset.LIGHT.displayName)
         assertEquals("AMOLED Black", ThemePreset.AMOLED.displayName)
+    }
+
+    @Test
+    fun testIntentParserWhatsApp() {
+        val intent1 = JarvisIntentParser.parse("Send a whatsapp message to Sarah saying meeting at 5")
+        assertTrue(intent1 is JarvisIntent.CommunicationWhatsApp)
+        val wa1 = intent1 as JarvisIntent.CommunicationWhatsApp
+        assertEquals("Sarah", wa1.targetContact)
+
+        val intentHinglish = JarvisIntentParser.parse("Sarah ko whatsapp pe message bhejo ki I will be late")
+        assertTrue(intentHinglish is JarvisIntent.CommunicationWhatsApp)
+        val wa2 = intentHinglish as JarvisIntent.CommunicationWhatsApp
+        assertEquals("Sarah", wa2.targetContact)
+    }
+
+    @Test
+    fun testIntentParserPhoneCall() {
+        val intent1 = JarvisIntentParser.parse("Call Sarah right now")
+        assertTrue(intent1 is JarvisIntent.CommunicationCall)
+        val call1 = intent1 as JarvisIntent.CommunicationCall
+        assertEquals("Sarah", call1.targetContact)
+
+        val intentHindi = JarvisIntentParser.parse("Sarah ko phone milao")
+        assertTrue(intentHindi is JarvisIntent.CommunicationCall)
+        val call2 = intentHindi as JarvisIntent.CommunicationCall
+        assertEquals("Sarah", call2.targetContact)
+    }
+
+    @Test
+    fun testIntentParserYouTubeAndSpotify() {
+        val ytIntent = JarvisIntentParser.parse("Search youtube for Jetpack Compose animations")
+        assertTrue(ytIntent is JarvisIntent.YouTubeAction)
+        val yt = ytIntent as JarvisIntent.YouTubeAction
+        assertTrue(yt.query.contains("compose"))
+
+        val spotIntent = JarvisIntentParser.parse("Play synthwave on spotify")
+        assertTrue(spotIntent is JarvisIntent.SpotifyAction)
+        val spot = spotIntent as JarvisIntent.SpotifyAction
+        assertTrue(spot.trackOrArtist.contains("synthwave"))
+    }
+
+    @Test
+    fun testIntentParserTelemetryAndWeather() {
+        val batIntent = JarvisIntentParser.parse("Check battery status")
+        assertTrue(batIntent is JarvisIntent.DeviceTelemetryAction)
+        assertEquals("battery", (batIntent as JarvisIntent.DeviceTelemetryAction).target)
+
+        val weatherIntent = JarvisIntentParser.parse("Aaj ka mausam kaisa hai")
+        assertTrue(weatherIntent is JarvisIntent.WeatherQuery)
+    }
+
+    @Test
+    fun testPersonaPromptBuilder() {
+        val persona = AiPersonaConfig(
+            assistantName = "JARVIS",
+            personalityType = PersonalityType.LOYAL_BUTLER,
+            formalityLevel = 0.85f,
+            responseStyle = "Concise & Loyal",
+            customInstructions = "Always greet Master respectfully."
+        )
+        val memories = listOf(
+            NeuralMemory("m1", MemoryCategory.USER_PREFERENCES, "Preferred Name", "Address user as Master."),
+            NeuralMemory("m2", MemoryCategory.SAVED_FACTS, "Location", "Silicon Valley.")
+        )
+        val prompt = PersonaPromptBuilder.buildSystemInstruction("Master", persona, memories)
+        assertTrue(prompt.contains("JARVIS"))
+        assertTrue(prompt.contains("British-style AI Butler"))
+        assertTrue(prompt.contains("Formality Level: 85%"))
+        assertTrue(prompt.contains("NEURAL CORE MEMORIES"))
+        assertTrue(prompt.contains("Address user as Master."))
     }
 }
