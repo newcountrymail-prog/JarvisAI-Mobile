@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="sunset_bg">#FFF0E9</color>
+    <color name="sunset_bg_secondary">#FCEAE5</color>
+    <color name="sunset_card">#FFF9F6</color>
+    <color name="sunset_text_primary">#32182B</color>
+    <color name="sunset_text_secondary">#98758D</color>
+    <color name="sunset_coral">#F16D43</color>
+    <color name="sunset_purple">#A66C91</color>
+    <color name="sunset_blue">#8295AD</color>
+    <color name="sunset_green">#28AE86</color>
+    <color name="sunset_border">#D9C7C4</color>
+</resources>
