@@ -44,6 +44,7 @@ import com.jarvis.assistant.automation.JarvisIntentParser
 import com.jarvis.assistant.data.model.AssistantState
 import com.jarvis.assistant.data.model.ChatMessage
 import com.jarvis.assistant.data.model.ChatMode
+import com.jarvis.assistant.data.model.MemoryCategory
 import com.jarvis.assistant.data.model.MessageSender
 import com.jarvis.assistant.data.model.TaskHudState
 import com.jarvis.assistant.data.model.TaskStatus
@@ -220,7 +221,7 @@ class MainActivity : ComponentActivity() {
                             assistantState = AssistantState.IDLE
                         }
                         is JarvisIntent.MemorySave -> {
-                            app.memoryRepository.addMemory("Voice Note", intent.fact, "Personal")
+                            app.memoryRepository.addMemory(MemoryCategory.USER_PREFERENCES, "Voice Note", intent.fact)
                             val reply = "Saved to neural core: ${intent.fact}"
                             voiceAiResponse = reply
                             app.chatRepository.addMessage(MessageSender.JARVIS, reply)
@@ -377,7 +378,7 @@ class MainActivity : ComponentActivity() {
                                             is JarvisIntent.WeatherQuery -> {
                                                 app.weatherRepository.refreshWeather()
                                                 val w = app.weatherRepository.weatherState.value
-                                                val reply = "Atmospheric telemetry for ${w.location}: ${w.temperature}°C, ${w.condition}. Humidity at ${w.humidity}%, pressure ${w.pressure} hPa, wind speed ${w.windSpeed} km/h."
+                                                val reply = "Atmospheric telemetry for ${w.location}: ${w.temperature}, ${w.condition}. Humidity at ${w.humidity}, wind speed ${w.windSpeed}."
                                                 app.chatRepository.addMessage(MessageSender.JARVIS, reply, mode = mode)
                                                 if (!silentExecution) {
                                                     app.voiceEngine.speak(reply, personaConfig.speakingSpeed)
@@ -418,7 +419,7 @@ class MainActivity : ComponentActivity() {
                                                 assistantState = AssistantState.IDLE
                                             }
                                             is JarvisIntent.MemorySave -> {
-                                                app.memoryRepository.addMemory("User Fact", intent.fact, "Personal")
+                                                app.memoryRepository.addMemory(MemoryCategory.USER_PREFERENCES, "User Fact", intent.fact)
                                                 val reply = "Affirmative. Stored in neural memory: \"${intent.fact}\""
                                                 app.chatRepository.addMessage(MessageSender.JARVIS, reply, mode = mode)
                                                 if (!silentExecution) {
