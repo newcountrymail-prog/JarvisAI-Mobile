@@ -590,6 +590,8 @@ class MainActivity : ComponentActivity() {
                                 memoryRepository = app.memoryRepository,
                                 automationController = app.automationController,
                                 voiceEngine = app.voiceEngine,
+                                geminiAiProvider = app.geminiAiProvider,
+                                taskEngine = app.taskEngine,
                                 onUpdateUserName = { newName -> scope.launch { app.preferences.setUserName(newName) } },
                                 onToggleSilentExecution = { silent -> scope.launch { app.preferences.setSilentExecution(silent) } },
                                 onLanguageChanged = { lang -> scope.launch { app.preferences.setLanguage(lang) } },
