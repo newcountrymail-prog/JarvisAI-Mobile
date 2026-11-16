@@ -10,8 +10,10 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.jarvis.assistant.data.model.AiPersonaConfig
+import com.jarvis.assistant.data.model.AiProviderType
 import com.jarvis.assistant.data.model.AvatarType
 import com.jarvis.assistant.data.model.DockEdge
+import com.jarvis.assistant.data.model.OrbCustomizationConfig
 import com.jarvis.assistant.data.model.OverlayAvatarConfig
 import com.jarvis.assistant.data.model.PersonalityType
 import com.jarvis.assistant.data.model.ThemePreset
@@ -31,17 +33,49 @@ class JarvisPreferences(private val context: Context) {
         val KEY_SILENT_EXECUTION = booleanPreferencesKey("silent_execution")
         val KEY_LANGUAGE = stringPreferencesKey("conversation_language")
 
+        // Active Provider Selection
+        val KEY_ACTIVE_PROVIDER = stringPreferencesKey("active_ai_provider")
+        val KEY_CODING_PROVIDER = stringPreferencesKey("coding_ai_provider")
+        val KEY_VOICE_PROVIDER = stringPreferencesKey("voice_ai_provider")
+        val KEY_BACKUP_PROVIDER = stringPreferencesKey("backup_ai_provider")
+        val KEY_AUTO_FALLBACK = booleanPreferencesKey("auto_fallback_enabled")
+
+        // 1. Google Gemini
+        val KEY_GEMINI_MODEL = stringPreferencesKey("gemini_model")
+        val KEY_GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+
+        // 2. OpenRouter
+        val KEY_OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
+        val KEY_OPENROUTER_MODEL = stringPreferencesKey("openrouter_model")
+
+        // 3. Qwen Coder AI
+        val KEY_QWEN_API_KEY = stringPreferencesKey("qwen_api_key")
+        val KEY_QWEN_MODEL = stringPreferencesKey("qwen_model")
+        val KEY_QWEN_BASE_URL = stringPreferencesKey("qwen_base_url")
+
+        // 4. Custom OpenAI
+        val KEY_CUSTOM_API_KEY = stringPreferencesKey("custom_openai_key")
+        val KEY_CUSTOM_BASE_URL = stringPreferencesKey("custom_openai_base_url")
+        val KEY_CUSTOM_MODEL = stringPreferencesKey("custom_openai_model")
+
+        // Voice & Male Voice Configuration
         val KEY_PERSONA_NAME = stringPreferencesKey("persona_name")
         val KEY_PERSONA_TYPE = stringPreferencesKey("persona_type")
         val KEY_PERSONA_INSTRUCTIONS = stringPreferencesKey("persona_instructions")
         val KEY_PERSONA_VOICE = stringPreferencesKey("persona_voice")
         val KEY_PERSONA_SPEED = floatPreferencesKey("persona_speed")
+        val KEY_PERSONA_PITCH = floatPreferencesKey("persona_pitch")
+        val KEY_MALE_VOICE_PRESET = stringPreferencesKey("male_voice_preset")
 
-        val KEY_GEMINI_MODEL = stringPreferencesKey("gemini_model")
-        val KEY_GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        // Orb Customization
+        val KEY_ORB_BATTERY_SAVER = booleanPreferencesKey("orb_battery_saver")
+        val KEY_ORB_PARTICLE_DENSITY = floatPreferencesKey("orb_particle_density")
+        val KEY_ORB_SIZE_SCALE = floatPreferencesKey("orb_size_scale")
+        val KEY_ORB_SPEED_SCALE = floatPreferencesKey("orb_speed_scale")
+        val KEY_ORB_AUDIO_REACTIVE = booleanPreferencesKey("orb_audio_reactive")
 
+        // Theme & Overlay
         val KEY_THEME = stringPreferencesKey("theme_preset")
-
         val KEY_OVERLAY_ENABLED = booleanPreferencesKey("overlay_enabled")
         val KEY_OVERLAY_AVATAR = stringPreferencesKey("overlay_avatar")
         val KEY_OVERLAY_SIZE = intPreferencesKey("overlay_size")
@@ -57,26 +91,62 @@ class JarvisPreferences(private val context: Context) {
     val silentExecutionFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_SILENT_EXECUTION] ?: false }
     val languageFlow: Flow<String> = context.dataStore.data.map { it[KEY_LANGUAGE] ?: "Hinglish" }
 
-    val geminiModelFlow: Flow<String> = context.dataStore.data.map { it[KEY_GEMINI_MODEL] ?: "gemini-3.1-flash-live-preview" }
+    // Active AI Providers
+    val activeProviderFlow: Flow<String> = context.dataStore.data.map { it[KEY_ACTIVE_PROVIDER] ?: AiProviderType.GEMINI.id }
+    val codingProviderFlow: Flow<String> = context.dataStore.data.map { it[KEY_CODING_PROVIDER] ?: AiProviderType.QWEN.id }
+    val voiceProviderFlow: Flow<String> = context.dataStore.data.map { it[KEY_VOICE_PROVIDER] ?: AiProviderType.GEMINI.id }
+    val backupProviderFlow: Flow<String> = context.dataStore.data.map { it[KEY_BACKUP_PROVIDER] ?: AiProviderType.OPENROUTER.id }
+    val autoFallbackFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_FALLBACK] ?: true }
+
+    // Gemini
+    val geminiModelFlow: Flow<String> = context.dataStore.data.map { it[KEY_GEMINI_MODEL] ?: "gemini-1.5-flash" }
     val geminiApiKeyFlow: Flow<String> = context.dataStore.data.map { it[KEY_GEMINI_API_KEY] ?: "" }
 
+    // OpenRouter
+    val openRouterApiKeyFlow: Flow<String> = context.dataStore.data.map { it[KEY_OPENROUTER_API_KEY] ?: "" }
+    val openRouterModelFlow: Flow<String> = context.dataStore.data.map { it[KEY_OPENROUTER_MODEL] ?: "meta-llama/llama-3.3-70b-instruct:free" }
+
+    // Qwen Coder AI
+    val qwenApiKeyFlow: Flow<String> = context.dataStore.data.map { it[KEY_QWEN_API_KEY] ?: "" }
+    val qwenModelFlow: Flow<String> = context.dataStore.data.map { it[KEY_QWEN_MODEL] ?: "qwen/qwen-2.5-coder-32b-instruct" }
+    val qwenBaseUrlFlow: Flow<String> = context.dataStore.data.map { it[KEY_QWEN_BASE_URL] ?: "https://openrouter.ai/api/v1" }
+
+    // Custom OpenAI
+    val customApiKeyFlow: Flow<String> = context.dataStore.data.map { it[KEY_CUSTOM_API_KEY] ?: "" }
+    val customBaseUrlFlow: Flow<String> = context.dataStore.data.map { it[KEY_CUSTOM_BASE_URL] ?: "http://10.0.2.2:11434/v1" }
+    val customModelFlow: Flow<String> = context.dataStore.data.map { it[KEY_CUSTOM_MODEL] ?: "llama3.2" }
+
+    // Theme Preset
     val themeFlow: Flow<ThemePreset> = context.dataStore.data.map {
-        val name = it[KEY_THEME] ?: ThemePreset.SUNSET.name
-        try { ThemePreset.valueOf(name) } catch (e: Exception) { ThemePreset.SUNSET }
+        val name = it[KEY_THEME] ?: ThemePreset.MIDNIGHT_COMMAND.name
+        try { ThemePreset.valueOf(name) } catch (e: Exception) { ThemePreset.MIDNIGHT_COMMAND }
     }
 
+    // Persona & Voice
     val personaFlow: Flow<AiPersonaConfig> = context.dataStore.data.map {
         val typeName = it[KEY_PERSONA_TYPE] ?: PersonalityType.LOYAL_BUTLER.name
         val pType = try { PersonalityType.valueOf(typeName) } catch (e: Exception) { PersonalityType.LOYAL_BUTLER }
         AiPersonaConfig(
-            assistantName = it[KEY_PERSONA_NAME] ?: "JARVIS",
+            assistantName = it[KEY_PERSONA_NAME] ?: "JARVIS X",
             personalityType = pType,
-            customInstructions = it[KEY_PERSONA_INSTRUCTIONS] ?: "Respond respectfully to Master. Deliver concise, actionable insights.",
-            voiceName = it[KEY_PERSONA_VOICE] ?: "Charon",
+            customInstructions = it[KEY_PERSONA_INSTRUCTIONS] ?: "Executive AI Operator. Clear, composed, intelligent masculine delivery.",
+            voiceName = it[KEY_PERSONA_VOICE] ?: "en-us-x-sfg#male",
             speakingSpeed = it[KEY_PERSONA_SPEED] ?: 1.0f
         )
     }
 
+    // Orb Customization
+    val orbConfigFlow: Flow<OrbCustomizationConfig> = context.dataStore.data.map {
+        OrbCustomizationConfig(
+            particleDensity = it[KEY_ORB_PARTICLE_DENSITY] ?: 1.0f,
+            sizeScale = it[KEY_ORB_SIZE_SCALE] ?: 1.0f,
+            rotationSpeedScale = it[KEY_ORB_SPEED_SCALE] ?: 1.0f,
+            isBatterySaver = it[KEY_ORB_BATTERY_SAVER] ?: false,
+            audioReactivity = it[KEY_ORB_AUDIO_REACTIVE] ?: true
+        )
+    }
+
+    // Overlay Avatar
     val overlayConfigFlow: Flow<OverlayAvatarConfig> = context.dataStore.data.map {
         val aType = try { AvatarType.valueOf(it[KEY_OVERLAY_AVATAR] ?: AvatarType.MINIMAL_ORB.name) } catch (e: Exception) { AvatarType.MINIMAL_ORB }
         val dEdge = try { DockEdge.valueOf(it[KEY_OVERLAY_DOCK] ?: DockEdge.RIGHT.name) } catch (e: Exception) { DockEdge.RIGHT }
@@ -94,8 +164,33 @@ class JarvisPreferences(private val context: Context) {
     suspend fun setVoiceEnrolled(enrolled: Boolean) = context.dataStore.edit { it[KEY_VOICE_ENROLLED] = enrolled }
     suspend fun setSilentExecution(silent: Boolean) = context.dataStore.edit { it[KEY_SILENT_EXECUTION] = silent }
     suspend fun setLanguage(lang: String) = context.dataStore.edit { it[KEY_LANGUAGE] = lang }
+
+    // Provider Setters
+    suspend fun setActiveProvider(providerId: String) = context.dataStore.edit { it[KEY_ACTIVE_PROVIDER] = providerId }
+    suspend fun setCodingProvider(providerId: String) = context.dataStore.edit { it[KEY_CODING_PROVIDER] = providerId }
+    suspend fun setVoiceProvider(providerId: String) = context.dataStore.edit { it[KEY_VOICE_PROVIDER] = providerId }
+    suspend fun setBackupProvider(providerId: String) = context.dataStore.edit { it[KEY_BACKUP_PROVIDER] = providerId }
+    suspend fun setAutoFallback(enabled: Boolean) = context.dataStore.edit { it[KEY_AUTO_FALLBACK] = enabled }
+
+    // Gemini
     suspend fun setGeminiModel(model: String) = context.dataStore.edit { it[KEY_GEMINI_MODEL] = model }
     suspend fun setGeminiApiKey(key: String) = context.dataStore.edit { it[KEY_GEMINI_API_KEY] = key }
+
+    // OpenRouter
+    suspend fun setOpenRouterApiKey(key: String) = context.dataStore.edit { it[KEY_OPENROUTER_API_KEY] = key }
+    suspend fun setOpenRouterModel(model: String) = context.dataStore.edit { it[KEY_OPENROUTER_MODEL] = model }
+
+    // Qwen
+    suspend fun setQwenApiKey(key: String) = context.dataStore.edit { it[KEY_QWEN_API_KEY] = key }
+    suspend fun setQwenModel(model: String) = context.dataStore.edit { it[KEY_QWEN_MODEL] = model }
+    suspend fun setQwenBaseUrl(url: String) = context.dataStore.edit { it[KEY_QWEN_BASE_URL] = url }
+
+    // Custom
+    suspend fun setCustomApiKey(key: String) = context.dataStore.edit { it[KEY_CUSTOM_API_KEY] = key }
+    suspend fun setCustomBaseUrl(url: String) = context.dataStore.edit { it[KEY_CUSTOM_BASE_URL] = url }
+    suspend fun setCustomModel(model: String) = context.dataStore.edit { it[KEY_CUSTOM_MODEL] = model }
+
+    // Theme & Persona
     suspend fun setThemePreset(theme: ThemePreset) = context.dataStore.edit { it[KEY_THEME] = theme.name }
 
     suspend fun updatePersona(config: AiPersonaConfig) = context.dataStore.edit {
@@ -104,6 +199,14 @@ class JarvisPreferences(private val context: Context) {
         it[KEY_PERSONA_INSTRUCTIONS] = config.customInstructions
         it[KEY_PERSONA_VOICE] = config.voiceName
         it[KEY_PERSONA_SPEED] = config.speakingSpeed
+    }
+
+    suspend fun updateOrbConfig(config: OrbCustomizationConfig) = context.dataStore.edit {
+        it[KEY_ORB_BATTERY_SAVER] = config.isBatterySaver
+        it[KEY_ORB_PARTICLE_DENSITY] = config.particleDensity
+        it[KEY_ORB_SIZE_SCALE] = config.sizeScale
+        it[KEY_ORB_SPEED_SCALE] = config.rotationSpeedScale
+        it[KEY_ORB_AUDIO_REACTIVE] = config.audioReactivity
     }
 
     suspend fun updateOverlayConfig(config: OverlayAvatarConfig) = context.dataStore.edit {

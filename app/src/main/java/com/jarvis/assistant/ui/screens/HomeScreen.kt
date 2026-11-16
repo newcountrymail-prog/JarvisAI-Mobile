@@ -80,6 +80,8 @@ fun HomeScreen(
     onLanguageSelected: (String) -> Unit,
     onMemoriesTapped: () -> Unit,
     onRequestScreenShare: () -> Unit,
+    audioAmplitude: Float = 0f,
+    orbConfig: com.jarvis.assistant.data.model.OrbCustomizationConfig = com.jarvis.assistant.data.model.OrbCustomizationConfig(),
     modifier: Modifier = Modifier
 ) {
     var showLanguageModal by remember { mutableStateOf(false) }
@@ -187,6 +189,8 @@ fun HomeScreen(
             FuturisticAiOrb(
                 state = assistantState,
                 size = 250.dp,
+                audioAmplitude = audioAmplitude,
+                config = orbConfig,
                 onOrbTapped = onPowerToggle
             )
 

@@ -22,10 +22,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -40,19 +40,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.jarvis.assistant.data.model.AssistantState
-import com.jarvis.assistant.ui.theme.SunsetBlue
-import com.jarvis.assistant.ui.theme.SunsetCardBackground
-import com.jarvis.assistant.ui.theme.SunsetCoral
-import com.jarvis.assistant.ui.theme.SunsetDarkPurple
-import com.jarvis.assistant.ui.theme.SunsetPeach
-import com.jarvis.assistant.ui.theme.SunsetPurple
-import com.jarvis.assistant.ui.theme.SunsetTextPrimary
-import com.jarvis.assistant.ui.theme.SunsetTextSecondary
+import com.jarvis.assistant.ui.theme.MidnightBackgroundSecondary
+import com.jarvis.assistant.ui.theme.MidnightBorder
+import com.jarvis.assistant.ui.theme.MidnightCardBackground
+import com.jarvis.assistant.ui.theme.MidnightElectricBlue
+import com.jarvis.assistant.ui.theme.MidnightEmerald
+import com.jarvis.assistant.ui.theme.MidnightNeonViolet
+import com.jarvis.assistant.ui.theme.MidnightTextPrimary
+import com.jarvis.assistant.ui.theme.MidnightTextSecondary
 
 enum class NavDestination(val route: String, val label: String) {
     HOME("home", "Home"),
     CHAT("chat", "Chat"),
+    TOOLS("tools", "Tools"),
     SETTINGS("settings", "Settings"),
+    TERMINAL("terminal", "Termux"),
+    SECURITY_LAB("security_lab", "Security Lab"),
+    QWEN_CODER("qwen_coder", "Qwen Coder"),
     UPDATES("updates", "Updates")
 }
 
@@ -76,12 +80,12 @@ fun FloatingBottomNavigation(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(68.dp)
-                .shadow(elevation = 14.dp, shape = RoundedCornerShape(36.dp), spotColor = SunsetPurple.copy(alpha = 0.25f))
+                .shadow(elevation = 16.dp, shape = RoundedCornerShape(36.dp), spotColor = MidnightElectricBlue.copy(alpha = 0.25f))
                 .clip(RoundedCornerShape(36.dp))
-                .background(SunsetCardBackground.copy(alpha = 0.94f))
+                .background(MidnightCardBackground.copy(alpha = 0.95f))
                 .border(
                     width = 1.dp,
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = MidnightBorder.copy(alpha = 0.8f),
                     shape = RoundedCornerShape(36.dp)
                 ),
             contentAlignment = Alignment.Center
@@ -110,23 +114,23 @@ fun FloatingBottomNavigation(
                 // Spacer for central prominent mic
                 Box(modifier = Modifier.size(62.dp))
 
-                // 4. Settings
+                // 4. Tools Hub
+                NavItem(
+                    icon = Icons.Default.Build,
+                    isSelected = currentDestination == NavDestination.TOOLS.route,
+                    onClick = { onNavigate(NavDestination.TOOLS.route) }
+                )
+
+                // 5. Settings
                 NavItem(
                     icon = Icons.Default.Settings,
                     isSelected = currentDestination == NavDestination.SETTINGS.route,
                     onClick = { onNavigate(NavDestination.SETTINGS.route) }
                 )
-
-                // 5. Updates
-                NavItem(
-                    icon = Icons.Default.Newspaper,
-                    isSelected = currentDestination == NavDestination.UPDATES.route,
-                    onClick = { onNavigate(NavDestination.UPDATES.route) }
-                )
             }
         }
 
-        // 3. Central Prominent Microphone Button (Layered slightly raised above the pill)
+        // 3. Central Prominent Microphone Button
         CentralMicButton(
             state = assistantState,
             onClick = onMicTapped,
@@ -142,11 +146,11 @@ private fun NavItem(
     onClick: () -> Unit
 ) {
     val iconColor by animateColorAsState(
-        targetValue = if (isSelected) SunsetTextPrimary else SunsetTextSecondary.copy(alpha = 0.8f),
+        targetValue = if (isSelected) MidnightElectricBlue else MidnightTextSecondary.copy(alpha = 0.7f),
         label = "NavIconColor"
     )
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) SunsetPeach.copy(alpha = 0.75f) else Color.Transparent,
+        targetValue = if (isSelected) MidnightElectricBlue.copy(alpha = 0.15f) else Color.Transparent,
         label = "NavBgColor"
     )
 
@@ -179,10 +183,9 @@ private fun CentralMicButton(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "CentralMicPulse")
 
-    // Ripple scale when active
     val rippleScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = 1.28f,
+        targetValue = 1.3f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 1000),
             repeatMode = RepeatMode.Restart
@@ -197,30 +200,28 @@ private fun CentralMicButton(
             .size(72.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Active pulsing aura ring
         if (isActive) {
             Box(
                 modifier = Modifier
                     .size(68.dp * rippleScale)
                     .clip(CircleShape)
-                    .background(SunsetCoral.copy(alpha = (1.3f - rippleScale).coerceIn(0f, 0.45f)))
+                    .background(MidnightElectricBlue.copy(alpha = (1.3f - rippleScale).coerceIn(0f, 0.45f)))
             )
         }
 
-        // Button container
         Box(
             modifier = Modifier
                 .size(62.dp)
-                .shadow(elevation = 10.dp, shape = CircleShape, spotColor = SunsetCoral.copy(alpha = 0.4f))
+                .shadow(elevation = 12.dp, shape = CircleShape, spotColor = MidnightElectricBlue.copy(alpha = 0.5f))
                 .clip(CircleShape)
                 .background(
                     Brush.linearGradient(
-                        colors = listOf(SunsetCoral, SunsetPurple)
+                        colors = listOf(MidnightElectricBlue, MidnightNeonViolet)
                     )
                 )
                 .border(
-                    width = 2.5.dp,
-                    color = SunsetBlue.copy(alpha = 0.75f),
+                    width = 2.dp,
+                    color = Color.White.copy(alpha = 0.4f),
                     shape = CircleShape
                 )
                 .clickable(
@@ -233,7 +234,7 @@ private fun CentralMicButton(
             Icon(
                 imageVector = Icons.Default.Mic,
                 contentDescription = "Voice Interaction",
-                tint = Color.White,
+                tint = Color.Black,
                 modifier = Modifier.size(28.dp)
             )
         }

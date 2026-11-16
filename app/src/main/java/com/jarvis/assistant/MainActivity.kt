@@ -55,12 +55,19 @@ import com.jarvis.assistant.ui.components.FloatingBottomNavigation
 import com.jarvis.assistant.ui.components.NavDestination
 import com.jarvis.assistant.ui.components.TaskHudOverlay
 import com.jarvis.assistant.ui.components.VoiceInteractionSheet
+import com.jarvis.assistant.data.model.OrbCustomizationConfig
+import com.jarvis.assistant.data.model.ProviderRole
 import com.jarvis.assistant.ui.screens.ChatScreen
+import com.jarvis.assistant.ui.screens.CodingWorkspaceScreen
 import com.jarvis.assistant.ui.screens.HomeScreen
+import com.jarvis.assistant.ui.screens.SecurityLabScreen
 import com.jarvis.assistant.ui.screens.SettingsScreen
+import com.jarvis.assistant.ui.screens.TerminalDashboardScreen
+import com.jarvis.assistant.ui.screens.ToolboxScreen
 import com.jarvis.assistant.ui.screens.UpdatesScreen
 import com.jarvis.assistant.ui.theme.JarvisTheme
 import com.jarvis.assistant.ui.theme.SunsetBackground
+import androidx.compose.material3.MaterialTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
@@ -92,6 +99,8 @@ class MainActivity : ComponentActivity() {
             val themePreset by app.preferences.themeFlow.collectAsState(initial = ThemePreset.SUNSET)
             val personaConfig by app.preferences.personaFlow.collectAsState(initial = com.jarvis.assistant.data.model.AiPersonaConfig())
             val overlayConfig by app.preferences.overlayConfigFlow.collectAsState(initial = com.jarvis.assistant.data.model.OverlayAvatarConfig())
+            val orbConfig by app.preferences.orbConfigFlow.collectAsState(initial = OrbCustomizationConfig())
+            val audioAmplitude by app.voiceEngine.audioAmplitudeFlow.collectAsState()
 
             // Live Weather
             val weatherState by app.weatherRepository.weatherState.collectAsState()
@@ -316,8 +325,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            JarvisTheme(darkTheme = themePreset == ThemePreset.DARK || themePreset == ThemePreset.AMOLED) {
-                Box(modifier = Modifier.fillMaxSize().background(SunsetBackground)) {
+            JarvisTheme(preset = themePreset, darkTheme = themePreset == ThemePreset.DARK || themePreset == ThemePreset.AMOLED) {
+                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     // Main NavHost
                     NavHost(
                         navController = navController,
@@ -329,6 +338,8 @@ class MainActivity : ComponentActivity() {
                                 assistantState = assistantState,
                                 weatherState = weatherState,
                                 currentLanguage = currentLanguage,
+                                audioAmplitude = audioAmplitude,
+                                orbConfig = orbConfig,
                                 onPowerToggle = {
                                     if (assistantState == AssistantState.OFFLINE) {
                                         assistantState = AssistantState.IDLE
@@ -479,12 +490,12 @@ class MainActivity : ComponentActivity() {
                                                     val history = app.chatRepository.getMessagesFlow().firstOrNull() ?: emptyList()
 
                                                     val sb = StringBuilder()
-                                                    app.geminiAiProvider.streamResponse(
+                                                    val role = if (mode == ChatMode.CODE) ProviderRole.CODING else ProviderRole.GENERAL
+                                                    app.aiProviderManager.streamResponse(
                                                         prompt = text,
                                                         conversationHistory = history.takeLast(10),
                                                         systemInstruction = systemInstruction,
-                                                        model = geminiModel,
-                                                        apiKey = geminiApiKey
+                                                        role = role
                                                     ).collect { chunk ->
                                                         isThinking = false
                                                         assistantState = AssistantState.SPEAKING
@@ -527,7 +538,7 @@ class MainActivity : ComponentActivity() {
                                     scope.launch {
                                         val history = app.chatRepository.getMessagesFlow().firstOrNull() ?: emptyList()
                                         val lastUserMsg = history.lastOrNull { it.sender == MessageSender.USER }
-                                        if (lastUserMsg != null && geminiApiKey.isNotBlank()) {
+                                        if (lastUserMsg != null) {
                                             isThinking = true
                                             val aiMsgId = app.chatRepository.addMessage(
                                                 sender = MessageSender.JARVIS,
@@ -538,12 +549,12 @@ class MainActivity : ComponentActivity() {
                                             val activeMemories = app.memoryRepository.memories.value
                                             val systemInstruction = PersonaPromptBuilder.buildSystemInstruction(userName, personaConfig, activeMemories)
                                             val sb = StringBuilder()
-                                            app.geminiAiProvider.streamResponse(
+                                            val role = if (lastUserMsg.mode == ChatMode.CODE) ProviderRole.CODING else ProviderRole.GENERAL
+                                            app.aiProviderManager.streamResponse(
                                                 prompt = lastUserMsg.text,
                                                 conversationHistory = history.dropLast(1).takeLast(10),
                                                 systemInstruction = systemInstruction,
-                                                model = geminiModel,
-                                                apiKey = geminiApiKey
+                                                role = role
                                             ).collect { chunk ->
                                                 isThinking = false
                                                 if (chunk.error != null) {
@@ -613,6 +624,37 @@ class MainActivity : ComponentActivity() {
 
                         composable(NavDestination.UPDATES.route) {
                             UpdatesScreen()
+                        }
+
+                        composable(NavDestination.TOOLS.route) {
+                            ToolboxScreen(
+                                deviceController = app.automationController,
+                                onNavigateTerminal = { navController.navigate(NavDestination.TERMINAL.route) },
+                                onNavigateSecurityLab = { navController.navigate(NavDestination.SECURITY_LAB.route) },
+                                onNavigateQwenCoder = { navController.navigate(NavDestination.QWEN_CODER.route) },
+                                onNavigateMemories = { navController.navigate(NavDestination.SETTINGS.route) }
+                            )
+                        }
+
+                        composable(NavDestination.TERMINAL.route) {
+                            TerminalDashboardScreen(
+                                engine = app.terminalEngine,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(NavDestination.SECURITY_LAB.route) {
+                            SecurityLabScreen(
+                                securityLab = app.securityLab,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(NavDestination.QWEN_CODER.route) {
+                            CodingWorkspaceScreen(
+                                aiProviderManager = app.aiProviderManager,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
                         }
                     }
 

@@ -13,6 +13,7 @@ enum class AssistantState(val label: String) {
     PROCESSING("Processing"),
     SPEAKING("Speaking"),
     EXECUTING_TASK("Executing Task"),
+    COMPLETED("Completed"),
     ERROR("Error")
 }
 
@@ -131,7 +132,8 @@ data class AiPersonaConfig(
 )
 
 enum class ThemePreset(val displayName: String) {
-    SUNSET("Sunset Theme"),
+    SUNSET("Sunset Glass"),
+    MIDNIGHT_COMMAND("Midnight Command"),
     DARK("Dark Theme"),
     LIGHT("Light Theme"),
     AMOLED("AMOLED Black"),
@@ -159,4 +161,27 @@ data class OverlayAvatarConfig(
     val opacity: Float = 0.9f,
     val dockEdge: DockEdge = DockEdge.RIGHT,
     val isWorkingOnly: Boolean = false
+)
+
+enum class AiProviderType(val id: String, val displayName: String, val description: String) {
+    GEMINI("google_gemini", "Google Gemini", "Gemini 1.5/2.0/3.0 Live & Flash models"),
+    OPENROUTER("openrouter", "OpenRouter", "Global unified model catalogue (Llama, Claude, DeepSeek, Mistral)"),
+    QWEN("qwen_coder", "Qwen Coder AI", "High-performance specialized coding engine"),
+    CUSTOM("custom_openai", "Custom OpenAI API", "Private LLM / Local vLLM / Ollama server")
+}
+
+enum class ProviderRole(val displayName: String) {
+    GENERAL("General Assistant"),
+    CODING("Coding Engine"),
+    VOICE("Voice Conversation"),
+    BACKUP("Fallback Provider")
+}
+
+data class OrbCustomizationConfig(
+    val particleDensity: Float = 1.0f,
+    val sizeScale: Float = 1.0f,
+    val rotationSpeedScale: Float = 1.0f,
+    val isBatterySaver: Boolean = false,
+    val glowIntensity: Float = 1.0f,
+    val audioReactivity: Boolean = true
 )

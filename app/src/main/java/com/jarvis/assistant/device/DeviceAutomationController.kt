@@ -1,24 +1,50 @@
 package com.jarvis.assistant.device
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.Environment
+import android.os.StatFs
 import android.provider.ContactsContract
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import java.io.File
 import java.net.URLEncoder
+import java.util.Locale
 
 data class ContactMatch(
     val name: String,
     val alias: String,
     val phoneNumber: String,
     val isWhatsAppAvailable: Boolean = true
+)
+
+data class StorageTelemetry(
+    val totalBytes: Long,
+    val freeBytes: Long,
+    val usedBytes: Long,
+    val totalFormatted: String,
+    val freeFormatted: String,
+    val usedFormatted: String,
+    val usagePercent: Int
+)
+
+data class MemoryTelemetry(
+    val totalRamBytes: Long,
+    val availableRamBytes: Long,
+    val usedRamBytes: Long,
+    val totalFormatted: String,
+    val availableFormatted: String,
+    val usagePercent: Int,
+    val isLowMemory: Boolean
 )
 
 data class DeviceTelemetry(
@@ -28,12 +54,17 @@ data class DeviceTelemetry(
     val isCellularConnected: Boolean,
     val networkName: String,
     val batteryHealth: String = "Good",
-    val isNetworkConnected: Boolean = isWifiConnected || isCellularConnected
+    val isNetworkConnected: Boolean = isWifiConnected || isCellularConnected,
+    val storage: StorageTelemetry? = null,
+    val memory: MemoryTelemetry? = null,
+    val screenBrightnessPercent: Int = 50,
+    val mediaVolumePercent: Int = 50
 )
 
 class DeviceAutomationController(private val context: Context) {
 
-    // Pre-configured known contact aliases as fallback / known mappings
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
     private val contactAliases = listOf(
         ContactMatch("Sarah Jenkins", "Sarah", "+15550199", isWhatsAppAvailable = true),
         ContactMatch("Amit Sharma", "Amit bhaiya", "+919876543210", isWhatsAppAvailable = true),
@@ -42,14 +73,9 @@ class DeviceAutomationController(private val context: Context) {
         ContactMatch("Elena Rostova", "Elena", "+15550177", isWhatsAppAvailable = true)
     )
 
-    /**
-     * Searches Android Contacts Provider with READ_CONTACTS permission,
-     * with fallback to saved alias table.
-     */
     fun resolveContact(query: String): ContactMatch? {
         val clean = query.trim().lowercase()
 
-        // 1. Try querying real Android Contacts ContentProvider if permission is granted
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
             val phoneContacts = queryAndroidContacts(clean)
             if (phoneContacts.isNotEmpty()) {
@@ -57,7 +83,6 @@ class DeviceAutomationController(private val context: Context) {
             }
         }
 
-        // 2. Fallback to Alias Matcher
         return contactAliases.firstOrNull {
             it.alias.lowercase() == clean ||
             it.name.lowercase().contains(clean) ||
@@ -108,6 +133,99 @@ class DeviceAutomationController(private val context: Context) {
     }
 
     fun getAllKnownContacts(): List<ContactMatch> = contactAliases
+
+    // --- STORAGE & MEMORY TELEMETRY ---
+    fun getStorageTelemetry(): StorageTelemetry {
+        return try {
+            val stat = StatFs(Environment.getDataDirectory().path)
+            val blockSize = stat.blockSizeLong
+            val totalBlocks = stat.blockCountLong
+            val freeBlocks = stat.availableBlocksLong
+
+            val totalBytes = totalBlocks * blockSize
+            val freeBytes = freeBlocks * blockSize
+            val usedBytes = totalBytes - freeBytes
+            val usagePercent = if (totalBytes > 0) ((usedBytes * 100) / totalBytes).toInt() else 0
+
+            StorageTelemetry(
+                totalBytes = totalBytes,
+                freeBytes = freeBytes,
+                usedBytes = usedBytes,
+                totalFormatted = formatBytes(totalBytes),
+                freeFormatted = formatBytes(freeBytes),
+                usedFormatted = formatBytes(usedBytes),
+                usagePercent = usagePercent
+            )
+        } catch (e: Exception) {
+            StorageTelemetry(0, 0, 0, "Unknown", "Unknown", "Unknown", 0)
+        }
+    }
+
+    fun getMemoryTelemetry(): MemoryTelemetry {
+        return try {
+            val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val memInfo = ActivityManager.MemoryInfo()
+            actManager.getMemoryInfo(memInfo)
+
+            val total = memInfo.totalMem
+            val avail = memInfo.availMem
+            val used = total - avail
+            val usagePercent = if (total > 0) ((used * 100) / total).toInt() else 0
+
+            MemoryTelemetry(
+                totalRamBytes = total,
+                availableRamBytes = avail,
+                usedRamBytes = used,
+                totalFormatted = formatBytes(total),
+                availableFormatted = formatBytes(avail),
+                usagePercent = usagePercent,
+                isLowMemory = memInfo.lowMemory
+            )
+        } catch (e: Exception) {
+            MemoryTelemetry(0, 0, 0, "Unknown", "Unknown", 0, false)
+        }
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        val gb = bytes.toDouble() / (1024 * 1024 * 1024)
+        return if (gb >= 1.0) {
+            String.format(Locale.US, "%.1f GB", gb)
+        } else {
+            val mb = bytes.toDouble() / (1024 * 1024)
+            String.format(Locale.US, "%.0f MB", mb)
+        }
+    }
+
+    // --- SOUND & MEDIA VOLUME ---
+    fun getMediaVolumePercent(): Int {
+        val am = audioManager ?: return 50
+        val current = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        return (current * 100) / max
+    }
+
+    fun setMediaVolumePercent(percent: Int): Boolean {
+        val am = audioManager ?: return false
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val target = ((percent.coerceIn(0, 100) * max) / 100)
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, target, AudioManager.FLAG_SHOW_UI)
+        return true
+    }
+
+    fun muteMedia(): Boolean {
+        audioManager?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+        return true
+    }
+
+    // --- DISPLAY BRIGHTNESS ---
+    fun getScreenBrightnessPercent(): Int {
+        return try {
+            val raw = Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS)
+            ((raw.coerceIn(0, 255) * 100) / 255)
+        } catch (_: Exception) {
+            50
+        }
+    }
 
     // --- WHATSAPP AUTOMATION ---
     fun openWhatsApp(): Boolean {
@@ -225,12 +343,21 @@ class DeviceAutomationController(private val context: Context) {
         val isCellular = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
         val netName = if (isWifi) "High-Speed Wi-Fi" else if (isCellular) "Cellular 5G/LTE" else "Offline Protocol"
 
+        val storage = getStorageTelemetry()
+        val memory = getMemoryTelemetry()
+        val brightness = getScreenBrightnessPercent()
+        val volume = getMediaVolumePercent()
+
         return DeviceTelemetry(
             batteryLevel = level,
             isCharging = isCharging,
             isWifiConnected = isWifi,
             isCellularConnected = isCellular,
-            networkName = netName
+            networkName = netName,
+            storage = storage,
+            memory = memory,
+            screenBrightnessPercent = brightness,
+            mediaVolumePercent = volume
         )
     }
 
@@ -276,6 +403,30 @@ class DeviceAutomationController(private val context: Context) {
 
     fun openDisplaySettings(): Boolean {
         val intent = Intent(Settings.ACTION_DISPLAY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        return true
+    }
+
+    fun openSoundSettings(): Boolean {
+        val intent = Intent(Settings.ACTION_SOUND_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        return true
+    }
+
+    fun openWifiSettings(): Boolean {
+        val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        return true
+    }
+
+    fun openBluetoothSettings(): Boolean {
+        val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)

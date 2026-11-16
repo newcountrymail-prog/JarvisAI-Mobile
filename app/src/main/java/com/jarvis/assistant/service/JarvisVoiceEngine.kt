@@ -11,11 +11,26 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.sin
+
+data class VoiceOption(
+    val name: String,
+    val displayName: String,
+    val locale: Locale,
+    val isMaleRecommended: Boolean,
+    val quality: String = "Normal"
+)
 
 class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListener {
 
@@ -23,6 +38,11 @@ class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListe
     private var speechRecognizer: SpeechRecognizer? = null
     private var isTtsInitialized = false
     private val scope = CoroutineScope(Dispatchers.IO)
+    private var ttsWaveJob: Job? = null
+
+    // Real-time Audio Amplitude (0.0f - 1.0f) for 3D Orb and reactive UI
+    private val _audioAmplitudeFlow = MutableStateFlow(0f)
+    val audioAmplitudeFlow: StateFlow<Float> = _audioAmplitudeFlow.asStateFlow()
 
     // Callbacks
     var onSpeechStarted: (() -> Unit)? = null
@@ -43,21 +63,98 @@ class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListe
             val result = tts?.setLanguage(Locale.US)
             if (result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED) {
                 isTtsInitialized = true
+                applyOptimalMaleVoice()
             }
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
+                    startTtsAmplitudeSimulation()
                     onSpeechStarted?.invoke()
                 }
 
                 override fun onDone(utteranceId: String?) {
+                    stopTtsAmplitudeSimulation()
                     onSpeechCompleted?.invoke()
                 }
 
                 override fun onError(utteranceId: String?) {
+                    stopTtsAmplitudeSimulation()
                     onSpeechCompleted?.invoke()
                 }
             })
         }
+    }
+
+    private fun applyOptimalMaleVoice() {
+        try {
+            val voices = tts?.voices ?: return
+            // Look for high-quality male voices in US, UK, or IN English
+            val preferredMale = voices.firstOrNull { v ->
+                val name = v.name.lowercase()
+                (name.contains("male") || name.contains("sfg") || name.contains("rjs") || name.contains("en-us-x-iom") || name.contains("en-in-x-cxx")) &&
+                        !v.isNetworkConnectionRequired && !name.contains("female")
+            } ?: voices.firstOrNull { it.locale.language == "en" && it.name.lowercase().contains("male") }
+
+            if (preferredMale != null) {
+                tts?.voice = preferredMale
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun getAvailableVoices(): List<VoiceOption> {
+        val list = mutableListOf<VoiceOption>()
+        try {
+            val voices = tts?.voices ?: return getDefaultVoicePresets()
+            for (v in voices) {
+                val nameLower = v.name.lowercase()
+                val isMale = nameLower.contains("male") || nameLower.contains("sfg") || nameLower.contains("rjs") ||
+                        nameLower.contains("cxx") || nameLower.contains("man") || !nameLower.contains("female")
+                val isTargetLocale = v.locale.language == "en" || v.locale.language == "hi"
+
+                if (isTargetLocale) {
+                    val quality = if (v.quality >= Voice.QUALITY_VERY_HIGH) "Ultra" else if (v.quality >= Voice.QUALITY_HIGH) "High" else "Standard"
+                    val label = "${v.locale.displayLanguage} (${v.locale.country}) - ${if (isMale) "Masculine" else "Feminine"}"
+                    list.add(
+                        VoiceOption(
+                            name = v.name,
+                            displayName = label,
+                            locale = v.locale,
+                            isMaleRecommended = isMale,
+                            quality = quality
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            return getDefaultVoicePresets()
+        }
+
+        return if (list.isEmpty()) getDefaultVoicePresets() else list.sortedByDescending { it.isMaleRecommended }
+    }
+
+    fun getDefaultVoicePresets(): List<VoiceOption> {
+        return listOf(
+            VoiceOption("en-us-x-sfg#male", "English (US) - Executive Male (JARVIS)", Locale.US, true, "Ultra"),
+            VoiceOption("en-gb-x-rjs#male", "English (UK) - British Butler Male", Locale.UK, true, "High"),
+            VoiceOption("en-in-x-cxx#male", "English (India) - Modern Indian Male", Locale("en", "IN"), true, "High"),
+            VoiceOption("hi-in-x-cfc#male", "Hindi (India) - Professional Male", Locale("hi", "IN"), true, "High")
+        )
+    }
+
+    fun setVoiceByName(voiceName: String): Boolean {
+        try {
+            val v = tts?.voices?.firstOrNull { it.name == voiceName }
+            if (v != null) {
+                tts?.voice = v
+                return true
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    fun previewVoice(voiceName: String, pitch: Float = 0.95f, speed: Float = 1.05f, text: String = "All systems operational, sir. JARVIS X online.") {
+        if (!isTtsInitialized) return
+        setVoiceByName(voiceName)
+        speak(text, speed = speed, pitch = pitch)
     }
 
     private fun initializeSpeechRecognizer() {
@@ -67,26 +164,32 @@ class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListe
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
                 setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
+                        _audioAmplitudeFlow.value = 0.05f
                         onListeningStarted?.invoke()
                     }
 
                     override fun onBeginningOfSpeech() {
-                        // User voice interruption: stop active TTS if speaking
                         stopSpeaking()
+                        _audioAmplitudeFlow.value = 0.35f
                         onListeningStarted?.invoke()
                     }
 
                     override fun onRmsChanged(rmsdB: Float) {
+                        // Normalize -2dB..10dB to 0..1
+                        val normalized = ((rmsdB + 2f) / 12f).coerceIn(0.05f, 1.0f)
+                        _audioAmplitudeFlow.value = normalized
                         onRmsDbChanged?.invoke(rmsdB)
                     }
 
                     override fun onBufferReceived(buffer: ByteArray?) {}
 
                     override fun onEndOfSpeech() {
+                        _audioAmplitudeFlow.value = 0f
                         onListeningEnded?.invoke()
                     }
 
                     override fun onError(error: Int) {
+                        _audioAmplitudeFlow.value = 0f
                         val errorDesc = when (error) {
                             SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
                             SpeechRecognizer.ERROR_CLIENT -> "Client speech error"
@@ -101,6 +204,7 @@ class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListe
                     }
 
                     override fun onResults(results: Bundle?) {
+                        _audioAmplitudeFlow.value = 0f
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         val text = matches?.firstOrNull() ?: ""
                         if (text.isNotBlank()) {
@@ -120,11 +224,32 @@ class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListe
         }
     }
 
+    private fun startTtsAmplitudeSimulation() {
+        ttsWaveJob?.cancel()
+        ttsWaveJob = scope.launch {
+            var step = 0
+            while (isActive) {
+                // Generates smooth rhythmic organic fluctuation (speech cadence)
+                val base = 0.45f + 0.35f * sin(step * 0.3).toFloat()
+                val jitter = (sin(step * 0.77) * 0.15).toFloat()
+                _audioAmplitudeFlow.value = (base + jitter).coerceIn(0.15f, 0.95f)
+                delay(60)
+                step++
+            }
+        }
+    }
+
+    private fun stopTtsAmplitudeSimulation() {
+        ttsWaveJob?.cancel()
+        ttsWaveJob = null
+        _audioAmplitudeFlow.value = 0f
+    }
+
     fun startListening(language: String = "en-US") {
         stopSpeaking()
         val tag = when (language.lowercase()) {
             "hindi", "hi" -> "hi-IN"
-            "hinglish" -> "hi-IN" // Android handles mixed Hindi/English acoustics well on Indian locale
+            "hinglish" -> "hi-IN"
             else -> "en-US"
         }
 
@@ -148,6 +273,7 @@ class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListe
         scope.launch(Dispatchers.Main) {
             try {
                 speechRecognizer?.stopListening()
+                _audioAmplitudeFlow.value = 0f
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -165,6 +291,7 @@ class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListe
 
     fun stopSpeaking() {
         tts?.stop()
+        stopTtsAmplitudeSimulation()
         onSpeechCompleted?.invoke()
     }
 
@@ -218,6 +345,7 @@ class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListe
     }
 
     fun destroy() {
+        stopTtsAmplitudeSimulation()
         tts?.stop()
         tts?.shutdown()
         tts = null

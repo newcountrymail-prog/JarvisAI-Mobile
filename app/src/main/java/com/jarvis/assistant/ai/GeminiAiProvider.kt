@@ -26,6 +26,106 @@ class GeminiAiProvider(
 
     override val providerId: String = "google_gemini"
     override val displayName: String = "Google Gemini Live & Flash"
+    override val defaultModel: String = "gemini-1.5-flash"
+
+    override suspend fun listModels(apiKey: String): Result<List<ModelInfo>> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.success(getCuratedDefaultModels())
+        }
+
+        try {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
+            val request = Request.Builder().url(url).get().build()
+            val response = client.newCall(request).execute()
+            val responseString = response.body?.string() ?: ""
+
+            if (!response.isSuccessful) {
+                return@withContext Result.success(getCuratedDefaultModels())
+            }
+
+            val root = JSONObject(responseString)
+            val modelsArray = root.optJSONArray("models") ?: JSONArray()
+            val result = mutableListOf<ModelInfo>()
+
+            for (i in 0 until modelsArray.length()) {
+                val item = modelsArray.getJSONObject(i)
+                val rawName = item.optString("name", "") // e.g. "models/gemini-1.5-flash"
+                val id = rawName.removePrefix("models/")
+                val displayName = item.optString("displayName", id)
+                val desc = item.optString("description", "")
+                val inputLimit = item.optInt("inputTokenLimit", 1048576)
+                val supportedMethods = item.optJSONArray("supportedGenerationMethods") ?: JSONArray()
+
+                var supportsGenerate = false
+                for (j in 0 until supportedMethods.length()) {
+                    if (supportedMethods.getString(j) == "generateContent") {
+                        supportsGenerate = true
+                        break
+                    }
+                }
+
+                if (supportsGenerate && id.contains("gemini")) {
+                    val caps = mutableSetOf(AiCapability.GENERAL, AiCapability.STREAMING)
+                    if (inputLimit >= 128000) caps.add(AiCapability.LONG_CONTEXT)
+                    if (id.contains("pro") || id.contains("thinking")) caps.add(AiCapability.REASONING)
+                    if (id.contains("flash")) caps.add(AiCapability.FAST)
+                    if (id.contains("coder") || id.contains("pro")) caps.add(AiCapability.CODING)
+
+                    result.add(
+                        ModelInfo(
+                            id = id,
+                            name = displayName,
+                            description = desc,
+                            contextLength = inputLimit,
+                            isFree = true,
+                            capabilities = caps
+                        )
+                    )
+                }
+            }
+
+            if (result.isEmpty()) Result.success(getCuratedDefaultModels()) else Result.success(result)
+        } catch (e: Exception) {
+            Result.success(getCuratedDefaultModels())
+        }
+    }
+
+    private fun getCuratedDefaultModels(): List<ModelInfo> {
+        return listOf(
+            ModelInfo(
+                id = "gemini-1.5-flash",
+                name = "Gemini 1.5 Flash",
+                description = "Fast, versatile multimodal model for general intelligence & speed.",
+                contextLength = 1048576,
+                isFree = true,
+                capabilities = setOf(AiCapability.GENERAL, AiCapability.FAST, AiCapability.STREAMING, AiCapability.LONG_CONTEXT)
+            ),
+            ModelInfo(
+                id = "gemini-1.5-pro",
+                name = "Gemini 1.5 Pro",
+                description = "Highly capable reasoning model for complex architecture and coding.",
+                contextLength = 2097152,
+                isFree = false,
+                capabilities = setOf(AiCapability.GENERAL, AiCapability.REASONING, AiCapability.CODING, AiCapability.LONG_CONTEXT)
+            ),
+            ModelInfo(
+                id = "gemini-2.0-flash",
+                name = "Gemini 2.0 Flash",
+                description = "Next-gen high efficiency model with advanced real-time performance.",
+                contextLength = 1048576,
+                isFree = true,
+                capabilities = setOf(AiCapability.GENERAL, AiCapability.FAST, AiCapability.STREAMING)
+            ),
+            ModelInfo(
+                id = "gemini-3.1-flash-live-preview",
+                name = "Gemini Live Realtime",
+                description = "Low-latency voice & conversational streaming model.",
+                contextLength = 128000,
+                isFree = true,
+                capabilities = setOf(AiCapability.GENERAL, AiCapability.FAST, AiCapability.STREAMING)
+            )
+        )
+    }
 
     override suspend fun generateResponse(
         prompt: String,
@@ -34,9 +134,10 @@ class GeminiAiProvider(
         model: String,
         apiKey: String
     ): Result<AiResponse> = withContext(Dispatchers.IO) {
+        val startTime = System.currentTimeMillis()
         if (apiKey.isBlank()) {
             return@withContext Result.failure(
-                IllegalStateException("Gemini API key is not configured. Please enter your API key in Settings & Intelligence ➔ Gemini Live API & Model.")
+                IllegalStateException("Gemini API key is required. Configure your API key in Settings ➔ AI Providers.")
             )
         }
 
@@ -47,11 +148,7 @@ class GeminiAiProvider(
             val jsonBody = buildRequestBody(prompt, conversationHistory, systemInstruction)
             val requestBody = jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
 
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
+            val request = Request.Builder().url(url).post(requestBody).build()
             val response = client.newCall(request).execute()
             val responseString = response.body?.string() ?: ""
 
@@ -68,12 +165,14 @@ class GeminiAiProvider(
                 AiResponse(
                     text = text,
                     model = resolvedModel,
+                    providerId = providerId,
                     usage = usage,
-                    isSuccess = true
+                    isSuccess = true,
+                    latencyMs = System.currentTimeMillis() - startTime
                 )
             )
         } catch (e: Exception) {
-            Result.failure(Exception("AI Engine Communication Failed: ${e.localizedMessage ?: "Unknown error"}"))
+            Result.failure(Exception("Gemini Communication Error: ${e.localizedMessage ?: "Unknown error"}"))
         }
     }
 
@@ -85,26 +184,16 @@ class GeminiAiProvider(
         apiKey: String
     ): Flow<AiStreamChunk> = flow {
         if (apiKey.isBlank()) {
-            emit(
-                AiStreamChunk(
-                    textDelta = "",
-                    isComplete = true,
-                    error = "Gemini API key is required. Set your key in Settings ➔ Gemini Live API."
-                )
-            )
+            emit(AiStreamChunk(textDelta = "", isComplete = true, error = "Gemini API key is required."))
             return@flow
         }
 
         val resolvedModel = resolveModelIdentifier(model)
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:streamGenerateContent?alt=sse&key=$apiKey"
-
         val jsonBody = buildRequestBody(prompt, conversationHistory, systemInstruction)
         val requestBody = jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
 
-        val request = Request.Builder()
-            .url(url)
-            .post(requestBody)
-            .build()
+        val request = Request.Builder().url(url).post(requestBody).build()
 
         try {
             val response = client.newCall(request).execute()
@@ -116,7 +205,7 @@ class GeminiAiProvider(
 
             val inputStream = response.body?.byteStream()
             if (inputStream == null) {
-                emit(AiStreamChunk(textDelta = "", isComplete = true, error = "Empty stream response from Gemini."))
+                emit(AiStreamChunk(textDelta = "", isComplete = true, error = "Empty stream response."))
                 return@flow
             }
 
@@ -126,62 +215,74 @@ class GeminiAiProvider(
             while (reader.readLine().also { line = it } != null) {
                 val currentLine = line ?: continue
                 if (currentLine.startsWith("data: ")) {
-                    val dataJson = currentLine.substring(6).trim()
-                    if (dataJson.isNotEmpty() && dataJson != "[DONE]") {
+                    val jsonChunk = currentLine.removePrefix("data: ").trim()
+                    if (jsonChunk.isNotBlank()) {
                         try {
-                            val chunkRoot = JSONObject(dataJson)
-                            val delta = extractTextFromResponse(chunkRoot)
-                            val usage = extractUsageMetadata(chunkRoot)
-                            if (delta.isNotEmpty()) {
-                                emit(AiStreamChunk(textDelta = delta, isComplete = false, usage = usage))
+                            val chunkObj = JSONObject(jsonChunk)
+                            val delta = extractTextFromResponse(chunkObj)
+                            if (delta.isNotBlank()) {
+                                emit(AiStreamChunk(textDelta = delta, isComplete = false))
                             }
-                        } catch (e: Exception) {
-                            // Ignored malformed chunk
-                        }
+                        } catch (_: Exception) {}
                     }
                 }
             }
-
             emit(AiStreamChunk(textDelta = "", isComplete = true))
         } catch (e: Exception) {
-            emit(AiStreamChunk(textDelta = "", isComplete = true, error = e.localizedMessage ?: "Stream connection error."))
+            emit(AiStreamChunk(textDelta = "", isComplete = true, error = e.localizedMessage ?: "Stream error"))
         }
     }.flowOn(Dispatchers.IO)
 
     override suspend fun testConnection(model: String, apiKey: String): Result<ConnectionTestResult> = withContext(Dispatchers.IO) {
+        val startTime = System.currentTimeMillis()
         if (apiKey.isBlank()) {
-            return@withContext Result.failure(Exception("API key cannot be empty."))
+            return@withContext Result.failure(IllegalStateException("API key is empty."))
         }
 
-        val startTime = System.currentTimeMillis()
-        val testPrompt = "Test connection. Reply with 'JARVIS CORE ONLINE'."
-        val result = generateResponse(testPrompt, emptyList(), "You are JARVIS verification system.", model, apiKey)
+        try {
+            val modelsResult = listModels(apiKey)
+            val discoveredCount = modelsResult.getOrNull()?.size ?: 0
 
-        val latency = System.currentTimeMillis() - startTime
+            val resolvedModel = resolveModelIdentifier(model)
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:generateContent?key=$apiKey"
 
-        result.fold(
-            onSuccess = {
+            val testPayload = JSONObject().apply {
+                put("contents", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().apply { put("text", "JARVIS connection test. Return 'ONLINE'.") })
+                        })
+                    })
+                })
+            }
+
+            val requestBody = testPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val request = Request.Builder().url(url).post(requestBody).build()
+            val response = client.newCall(request).execute()
+            val duration = System.currentTimeMillis() - startTime
+
+            if (response.isSuccessful) {
                 Result.success(
                     ConnectionTestResult(
                         isSuccessful = true,
-                        latencyMs = latency,
-                        message = "Connected to ${it.model} • Latency: ${latency}ms • Status: Online (SSL TLS 1.3)"
+                        latencyMs = duration,
+                        message = "HTTP 200 OK — Connected to Google Generative Language ($resolvedModel).",
+                        activeModel = resolvedModel,
+                        discoveredModelsCount = discoveredCount
                     )
                 )
-            },
-            onFailure = {
-                Result.failure(Exception("Verification Failed: ${it.localizedMessage}"))
+            } else {
+                val err = parseErrorMessage(response.code, response.body?.string() ?: "")
+                Result.failure(Exception(err))
             }
-        )
+        } catch (e: Exception) {
+            Result.failure(Exception("Connection handshake failed: ${e.localizedMessage ?: "Network unreachable"}"))
+        }
     }
 
     private fun resolveModelIdentifier(model: String): String {
-        return when (model) {
-            "gemini-3.1-flash-live-preview" -> "gemini-1.5-flash" // Current stable production target for 3.1 flash live
-            "gemini-1.5-pro" -> "gemini-1.5-pro"
-            "gemini-2.0-flash" -> "gemini-1.5-flash"
-            else -> if (model.isNotBlank()) model else "gemini-1.5-flash"
-        }
+        return model.trim().removePrefix("models/").ifBlank { defaultModel }
     }
 
     private fun buildRequestBody(
@@ -190,42 +291,37 @@ class GeminiAiProvider(
         systemInstruction: String
     ): JSONObject {
         val root = JSONObject()
-
-        // 1. System Instruction
         if (systemInstruction.isNotBlank()) {
-            val systemObj = JSONObject()
-            val partsArr = JSONArray().put(JSONObject().put("text", systemInstruction))
-            systemObj.put("parts", partsArr)
-            root.put("system_instruction", systemObj)
+            root.put("systemInstruction", JSONObject().apply {
+                put("parts", JSONArray().apply {
+                    put(JSONObject().apply { put("text", systemInstruction) })
+                })
+            })
         }
 
-        // 2. Contents (History + Latest Prompt)
-        val contentsArr = JSONArray()
-        // Include last 8 conversational turns for efficient context on 3GB RAM devices
-        history.takeLast(8).forEach { msg ->
+        val contentsArray = JSONArray()
+        for (msg in history.takeLast(10)) {
             val role = if (msg.sender == MessageSender.USER) "user" else "model"
-            val turnObj = JSONObject()
-            turnObj.put("role", role)
-            val parts = JSONArray().put(JSONObject().put("text", msg.text))
-            turnObj.put("parts", parts)
-            contentsArr.put(turnObj)
+            contentsArray.put(JSONObject().apply {
+                put("role", role)
+                put("parts", JSONArray().apply {
+                    put(JSONObject().apply { put("text", msg.text) })
+                })
+            })
         }
 
-        // Latest User prompt
-        val currentPromptObj = JSONObject()
-        currentPromptObj.put("role", "user")
-        val currentParts = JSONArray().put(JSONObject().put("text", prompt))
-        currentPromptObj.put("parts", currentParts)
-        contentsArr.put(currentPromptObj)
+        contentsArray.put(JSONObject().apply {
+            put("role", "user")
+            put("parts", JSONArray().apply {
+                put(JSONObject().apply { put("text", prompt) })
+            })
+        })
 
-        root.put("contents", contentsArr)
-
-        // 3. Generation Config
-        val genConfig = JSONObject().apply {
+        root.put("contents", contentsArray)
+        root.put("generationConfig", JSONObject().apply {
             put("temperature", 0.7)
             put("maxOutputTokens", 2048)
-        }
-        root.put("generationConfig", genConfig)
+        })
 
         return root
     }
@@ -238,8 +334,7 @@ class GeminiAiProvider(
         val parts = content.optJSONArray("parts") ?: return ""
         val sb = StringBuilder()
         for (i in 0 until parts.length()) {
-            val part = parts.getJSONObject(i)
-            sb.append(part.optString("text", ""))
+            sb.append(parts.getJSONObject(i).optString("text", ""))
         }
         return sb.toString()
     }
@@ -254,19 +349,19 @@ class GeminiAiProvider(
     }
 
     private fun parseErrorMessage(code: Int, body: String): String {
-        return try {
-            val root = JSONObject(body)
-            val err = root.optJSONObject("error")
-            val message = err?.optString("message", "")
-            when (code) {
-                400 -> "Invalid Request: ${message ?: "Check model parameter and prompt payload."}"
-                401, 403 -> "Authentication Error: The provided Gemini API Key is invalid or unauthorized."
-                429 -> "Rate Limit Exceeded: Gemini quota exceeded. Please wait a moment."
-                500, 503 -> "Google Gemini service temporarily unavailable (HTTP $code). Retrying recommended."
-                else -> "HTTP $code: ${message ?: "Unknown server response."}"
-            }
-        } catch (e: Exception) {
-            "HTTP $code: Unable to connect to Google Generative Language service."
+        val serverMsg = try {
+            JSONObject(body).optJSONObject("error")?.optString("message", "") ?: ""
+        } catch (_: Exception) { "" }
+
+        val detail = if (serverMsg.isNotBlank()) " Detail: $serverMsg" else ""
+
+        return when (code) {
+            400 -> "HTTP 400 Bad Request: Invalid model parameters or unsupported prompt structure.$detail"
+            401, 403 -> "HTTP $code Unauthorized/Forbidden: API key is invalid or restricted for this Google AI Studio project.$detail"
+            404 -> "HTTP 404 Model Not Found: The requested model identifier is unavailable.$detail"
+            429 -> "HTTP 429 Quota Exceeded: Model rate limits or quota exhausted for this API key.$detail"
+            500, 503 -> "HTTP $code Service Unavailable: Google Generative AI backend temporarily offline.$detail"
+            else -> "HTTP $code Error: Request failed.$detail"
         }
     }
 }

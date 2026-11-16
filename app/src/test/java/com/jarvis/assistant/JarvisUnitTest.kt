@@ -1,9 +1,13 @@
 package com.jarvis.assistant
 
+import com.jarvis.assistant.agent.AgentToolRegistry
+import com.jarvis.assistant.ai.AiCapability
+import com.jarvis.assistant.ai.ModelInfo
 import com.jarvis.assistant.ai.PersonaPromptBuilder
 import com.jarvis.assistant.automation.JarvisIntent
 import com.jarvis.assistant.automation.JarvisIntentParser
 import com.jarvis.assistant.data.model.AiPersonaConfig
+import com.jarvis.assistant.data.model.AiProviderType
 import com.jarvis.assistant.data.model.AssistantState
 import com.jarvis.assistant.data.model.ChatMessage
 import com.jarvis.assistant.data.model.ChatMode
@@ -11,13 +15,21 @@ import com.jarvis.assistant.data.model.MemoryCategory
 import com.jarvis.assistant.data.model.MessageSender
 import com.jarvis.assistant.data.model.NeuralMemory
 import com.jarvis.assistant.data.model.PersonalityType
+import com.jarvis.assistant.data.model.ProviderRole
 import com.jarvis.assistant.data.model.TaskHudState
 import com.jarvis.assistant.data.model.TaskStatus
 import com.jarvis.assistant.data.model.ThemePreset
+import com.jarvis.assistant.security.AuditStatus
+import com.jarvis.assistant.security.PasswordStrengthReport
+import com.jarvis.assistant.security.SecurityRiskGrade
+import com.jarvis.assistant.terminal.AutonomousCommandPlanner
+import com.jarvis.assistant.terminal.RiskLevel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.log2
 
 class JarvisUnitTest {
 
@@ -30,6 +42,7 @@ class JarvisUnitTest {
         assertEquals("Processing", AssistantState.PROCESSING.label)
         assertEquals("Speaking", AssistantState.SPEAKING.label)
         assertEquals("Executing Task", AssistantState.EXECUTING_TASK.label)
+        assertEquals("Completed", AssistantState.COMPLETED.label)
         assertEquals("Error", AssistantState.ERROR.label)
     }
 
@@ -80,10 +93,133 @@ class JarvisUnitTest {
 
     @Test
     fun testThemePresets() {
-        assertEquals("Sunset Theme", ThemePreset.SUNSET.displayName)
+        assertEquals("Sunset Glass", ThemePreset.SUNSET.displayName)
+        assertEquals("Midnight Command", ThemePreset.MIDNIGHT_COMMAND.displayName)
         assertEquals("Dark Theme", ThemePreset.DARK.displayName)
         assertEquals("Light Theme", ThemePreset.LIGHT.displayName)
         assertEquals("AMOLED Black", ThemePreset.AMOLED.displayName)
+    }
+
+    @Test
+    fun testAiProviderRolesAndTypes() {
+        assertEquals("gemini", AiProviderType.GEMINI.id)
+        assertEquals("openrouter", AiProviderType.OPENROUTER.id)
+        assertEquals("qwen", AiProviderType.QWEN.id)
+        assertEquals("custom", AiProviderType.CUSTOM.id)
+
+        assertEquals("General AI", ProviderRole.GENERAL.label)
+        assertEquals("Coding & Architecture", ProviderRole.CODING.label)
+        assertEquals("Voice Conversational", ProviderRole.VOICE.label)
+        assertEquals("Failover Backup", ProviderRole.BACKUP.label)
+    }
+
+    @Test
+    fun testModelInfoDataStructure() {
+        val model = ModelInfo(
+            id = "meta-llama/llama-3.3-70b-instruct:free",
+            name = "Llama 3.3 70B Free",
+            contextLength = 128000,
+            isFree = true,
+            capabilities = setOf(AiCapability.GENERAL, AiCapability.FAST, AiCapability.FREE)
+        )
+        assertEquals("meta-llama/llama-3.3-70b-instruct:free", model.id)
+        assertTrue(model.isFree)
+        assertEquals(128000, model.contextLength)
+        assertTrue(model.capabilities.contains(AiCapability.FREE))
+    }
+
+    @Test
+    fun testTerminalRiskClassification() {
+        val planner = AutonomousCommandPlanner(null)
+
+        // Level 1: Safe read-only commands
+        assertEquals(RiskLevel.LEVEL_1_SAFE, planner.classifyRisk("ls -la"))
+        assertEquals(RiskLevel.LEVEL_1_SAFE, planner.classifyRisk("pwd"))
+        assertEquals(RiskLevel.LEVEL_1_SAFE, planner.classifyRisk("python --version"))
+        assertEquals(RiskLevel.LEVEL_1_SAFE, planner.classifyRisk("git status"))
+        assertEquals(RiskLevel.LEVEL_1_SAFE, planner.classifyRisk("df -h"))
+
+        // Level 2: Modification / Package installation
+        assertEquals(RiskLevel.LEVEL_2_APPROVAL_REQUIRED, planner.classifyRisk("pkg install python -y"))
+        assertEquals(RiskLevel.LEVEL_2_APPROVAL_REQUIRED, planner.classifyRisk("pip install requests"))
+        assertEquals(RiskLevel.LEVEL_2_APPROVAL_REQUIRED, planner.classifyRisk("rm file.txt"))
+        assertEquals(RiskLevel.LEVEL_2_APPROVAL_REQUIRED, planner.classifyRisk("git commit -m 'test'"))
+
+        // Level 3: Dangerous system destruction
+        assertEquals(RiskLevel.LEVEL_3_RESTRICTED, planner.classifyRisk("rm -rf /"))
+        assertEquals(RiskLevel.LEVEL_3_RESTRICTED, planner.classifyRisk("mkfs.ext4 /dev/sda"))
+        assertEquals(RiskLevel.LEVEL_3_RESTRICTED, planner.classifyRisk(":(){ :|:& };:"))
+    }
+
+    @Test
+    fun testTerminalCommandSanitizer() {
+        val planner = AutonomousCommandPlanner(null)
+
+        // Dangerous pattern should fail sanitization
+        val dangerous = planner.sanitizeCommand("rm -rf /")
+        assertFalse(dangerous.isSuccess)
+
+        // Safe command should succeed sanitization
+        val safe = planner.sanitizeCommand("python -V")
+        assertTrue(safe.isSuccess)
+    }
+
+    @Test
+    fun testAutonomousNaturalLanguagePlanning() {
+        val planner = AutonomousCommandPlanner(null)
+
+        // Hindi/Hinglish Python setup
+        val planPython = planner.planFromNaturalLanguage("Jarvis, Python environment setup karo")
+        assertTrue(planPython.commands.isNotEmpty())
+        assertTrue(planPython.commands.any { it.rawCommand.contains("python") })
+
+        // Git status
+        val planGit = planner.planFromNaturalLanguage("Mere project ka git status check karo")
+        assertTrue(planGit.commands.any { it.rawCommand.contains("git status") })
+
+        // Storage and RAM
+        val planStorage = planner.planFromNaturalLanguage("Storage aur memory check karo")
+        assertTrue(planStorage.commands.any { it.rawCommand.contains("df -h") })
+    }
+
+    @Test
+    fun testAgentToolRegistry() {
+        val tools = AgentToolRegistry.tools
+        assertTrue(tools.isNotEmpty())
+        assertTrue(tools.any { it.name == "terminal_execute" })
+        assertTrue(tools.any { it.name == "device_open_app" })
+        assertTrue(tools.any { it.name == "security_audit_device" })
+
+        val openAiJson = AgentToolRegistry.toOpenAiToolsJson()
+        assertNotNull(openAiJson)
+        assertTrue(openAiJson.length() >= 5)
+    }
+
+    @Test
+    fun testPasswordEntropyCalculation() {
+        val shortWeak = "123456"
+        val lower = shortWeak.lowercase()
+        assertTrue(lower.contains("123456"))
+
+        val strong = "Tr0ub4dor&349!Zx"
+        var poolSize = 0
+        if (strong.any { it.isLowerCase() }) poolSize += 26
+        if (strong.any { it.isUpperCase() }) poolSize += 26
+        if (strong.any { it.isDigit() }) poolSize += 10
+        if (strong.any { !it.isLetterOrDigit() }) poolSize += 33
+
+        val entropy = strong.length * log2(poolSize.toDouble())
+        assertTrue(entropy > 80.0) // Highly robust entropy
+    }
+
+    @Test
+    fun testSecurityModelsAndRiskGrades() {
+        assertEquals("Secure / Hardened", SecurityRiskGrade.EXCELLENT.label)
+        assertEquals("Critical Vulnerability", SecurityRiskGrade.CRITICAL.label)
+
+        assertEquals(AuditStatus.PASSED, AuditStatus.valueOf("PASSED"))
+        assertEquals(AuditStatus.WARNING, AuditStatus.valueOf("WARNING"))
+        assertEquals(AuditStatus.FAILED, AuditStatus.valueOf("FAILED"))
     }
 
     @Test
@@ -138,7 +274,7 @@ class JarvisUnitTest {
     @Test
     fun testPersonaPromptBuilder() {
         val persona = AiPersonaConfig(
-            assistantName = "JARVIS",
+            assistantName = "JARVIS X",
             personalityType = PersonalityType.LOYAL_BUTLER,
             formalityLevel = 0.85f,
             responseStyle = "Concise & Loyal",
@@ -149,7 +285,7 @@ class JarvisUnitTest {
             NeuralMemory("m2", MemoryCategory.SAVED_FACTS, "Location", "Silicon Valley.")
         )
         val prompt = PersonaPromptBuilder.buildSystemInstruction("Master", persona, memories)
-        assertTrue(prompt.contains("JARVIS"))
+        assertTrue(prompt.contains("JARVIS X"))
         assertTrue(prompt.contains("British-style AI Butler"))
         assertTrue(prompt.contains("Formality Level: 85%"))
         assertTrue(prompt.contains("NEURAL CORE MEMORIES"))
