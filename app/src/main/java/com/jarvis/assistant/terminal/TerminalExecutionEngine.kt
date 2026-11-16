@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.jarvis.assistant.ai.AiProviderManager
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -15,6 +16,7 @@ class TerminalExecutionEngine(
     val bridge: TermuxBridge = TermuxBridge(context),
     val planner: AutonomousCommandPlanner = AutonomousCommandPlanner(),
     val toolRegistry: ToolDiscoveryRegistry = ToolDiscoveryRegistry(),
+    val aiProviderManager: AiProviderManager? = null,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default)
 ) {
 
@@ -29,6 +31,30 @@ class TerminalExecutionEngine(
     private var currentPlan: ExecutionPlan? = null
     private var pendingCommands = mutableListOf<TerminalCommand>()
     private var lastFailedCommand: TerminalCommand? = null
+
+    fun processNaturalLanguageInstruction(
+        userPrompt: String,
+        workingDir: String? = null
+    ) {
+        executeAutonomousTask(userPrompt, workingDir)
+    }
+
+    fun approvePendingPlan(workingDir: String? = null) {
+        approveCommand(workingDir)
+    }
+
+    fun rejectPendingPlan() {
+        rejectCommand()
+    }
+
+    suspend fun refreshToolRegistry() {
+        val tools = toolRegistry.auditInstalledTools(bridge)
+        _dashboardState.value = _dashboardState.value.copy(
+            discoveredTools = tools,
+            isTermuxInstalled = bridge.isTermuxInstalled(),
+            isTermuxPermissionGranted = bridge.hasRunCommandPermission()
+        )
+    }
 
     fun executeAutonomousTask(
         userPrompt: String,

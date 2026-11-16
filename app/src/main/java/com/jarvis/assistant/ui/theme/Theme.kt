@@ -214,7 +214,7 @@ fun JarvisTheme(
     content: @Composable () -> Unit
 ) {
     val colorScheme = when (preset) {
-        ThemePreset.MIDNIGHT_COMMAND, ThemePreset.DARK, ThemePreset.AMOLED, ThemePreset.CYBERPUNK -> MidnightColorScheme
+        ThemePreset.MIDNIGHT_COMMAND, ThemePreset.DARK, ThemePreset.AMOLED, ThemePreset.CUSTOM -> MidnightColorScheme
         else -> if (darkTheme) MidnightColorScheme else SunsetColorScheme
     }
 
