@@ -26,7 +26,9 @@ data class DeviceTelemetry(
     val isCharging: Boolean,
     val isWifiConnected: Boolean,
     val isCellularConnected: Boolean,
-    val networkName: String
+    val networkName: String,
+    val batteryHealth: String = "Good",
+    val isNetworkConnected: Boolean = isWifiConnected || isCellularConnected
 )
 
 class DeviceAutomationController(private val context: Context) {
@@ -238,6 +240,38 @@ class DeviceAutomationController(private val context: Context) {
         }
         context.startActivity(intent)
         return true
+    }
+
+    fun openSettings(): Boolean = openSystemSettings()
+
+    fun openApp(appName: String): Boolean {
+        val pm = context.packageManager
+        val queryLower = appName.lowercase().trim()
+        val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+        val match = installedApps.firstOrNull { appInfo ->
+            val label = pm.getApplicationLabel(appInfo).toString().lowercase()
+            label.contains(queryLower) || appInfo.packageName.lowercase().contains(queryLower)
+        }
+        val targetPackage = match?.packageName ?: when {
+            queryLower.contains("whatsapp") -> "com.whatsapp"
+            queryLower.contains("youtube") -> "com.google.android.youtube"
+            queryLower.contains("spotify") -> "com.spotify.music"
+            queryLower.contains("chrome") -> "com.android.chrome"
+            queryLower.contains("settings") -> {
+                return openSystemSettings()
+            }
+            else -> null
+        }
+
+        if (targetPackage != null) {
+            val launchIntent = pm.getLaunchIntentForPackage(targetPackage)
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(launchIntent)
+                return true
+            }
+        }
+        return false
     }
 
     fun openDisplaySettings(): Boolean {
