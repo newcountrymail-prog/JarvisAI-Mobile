@@ -332,4 +332,9 @@ class TaskExecutionEngine(
             currentOperation = "Execution cancelled by operator."
         )
     }
+
+    fun dismissHud() {
+        cancelActiveTask()
+        _hudState.value = TaskHudState(isActive = false)
+    }
 }

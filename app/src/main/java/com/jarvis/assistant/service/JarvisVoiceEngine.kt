@@ -168,6 +168,11 @@ class JarvisVoiceEngine(private val context: Context) : TextToSpeech.OnInitListe
         onSpeechCompleted?.invoke()
     }
 
+    fun stop() {
+        stopListening()
+        stopSpeaking()
+    }
+
     fun playActivationChime() {
         scope.launch {
             try {
