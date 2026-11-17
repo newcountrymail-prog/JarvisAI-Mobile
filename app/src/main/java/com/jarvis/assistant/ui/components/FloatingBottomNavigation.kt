@@ -58,6 +58,7 @@ enum class NavDestination(val route: String, val label: String) {
     SECURITY_LAB("security_lab", "Security Lab"),
     QWEN_CODER("qwen_coder", "Qwen Coder"),
     GEMINI_DIAGNOSTICS("gemini_diagnostics", "Gemini Diagnostics"),
+    AI_CONTROL_CENTER("ai_control_center", "AI Control Center"),
     UPDATES("updates", "Updates")
 }
 

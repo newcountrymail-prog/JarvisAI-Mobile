@@ -67,6 +67,7 @@ fun ToolboxScreen(
     onNavigateQwenCoder: () -> Unit,
     onNavigateMemories: () -> Unit,
     onNavigateGeminiDiagnostics: () -> Unit = {},
+    onNavigateAiControlCenter: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -115,6 +116,16 @@ fun ToolboxScreen(
                 fontSize = 11.sp,
                 letterSpacing = 1.sp
             )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            ToolLaunchCard(
+                title = "AI Control Center (Multi-Model)",
+                subtitle = "Universal API manager, free model library & autonomous provider rotation",
+                icon = Icons.Default.Bolt,
+                accentColor = Color(0xFF00E5FF),
+                onClick = onNavigateAiControlCenter
+            )
+
             Spacer(modifier = Modifier.height(10.dp))
 
             ToolLaunchCard(

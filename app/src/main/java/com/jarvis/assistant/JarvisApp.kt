@@ -21,6 +21,7 @@ import com.jarvis.assistant.terminal.TerminalExecutionEngine
 import com.jarvis.assistant.terminal.TermuxBridge
 import com.jarvis.assistant.terminal.ToolDiscoveryRegistry
 import com.jarvis.assistant.ai.gemini.GeminiAutoConfigEngine
+import com.jarvis.assistant.ai.orchestration.UniversalAiOrchestrator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -67,6 +68,9 @@ class JarvisApp : Application() {
         private set
 
     lateinit var aiProviderManager: AiProviderManager
+        private set
+
+    lateinit var universalOrchestrator: UniversalAiOrchestrator
         private set
 
     lateinit var securityLab: SecurityLab
@@ -116,6 +120,11 @@ class JarvisApp : Application() {
             openRouterProvider = openRouterProvider,
             qwenProvider = qwenAiProvider,
             customProvider = customAiProvider,
+            preferences = preferences,
+            scope = applicationScope
+        )
+
+        universalOrchestrator = UniversalAiOrchestrator(
             preferences = preferences,
             scope = applicationScope
         )

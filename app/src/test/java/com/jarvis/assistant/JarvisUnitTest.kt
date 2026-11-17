@@ -406,4 +406,228 @@ class JarvisUnitTest {
         assertEquals("gemini-1.5-flash", best.id)
         assertEquals(com.jarvis.assistant.ai.gemini.ModelCapabilityCategory.FAST_RESPONSE, best.category)
     }
+
+    // =========================================================================
+    // UNIVERSAL AI ORCHESTRATION UNIT TESTS
+    // =========================================================================
+
+    @Test
+    fun testOrchestrationProviderPresetsAndDetection() {
+        val engine = com.jarvis.assistant.ai.orchestration.ProviderDiscoveryEngine()
+
+        // OpenRouter detection
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.ProviderPreset.OPENROUTER,
+            engine.detectProvider("sk-or-v1-00000000000000000000000000000000", "https://openrouter.ai/api/v1")
+        )
+
+        // Gemini detection
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.ProviderPreset.GEMINI,
+            engine.detectProvider("AIzaSyDummyTestKey0000000000000000000", "https://generativelanguage.googleapis.com")
+        )
+
+        // OpenAI detection
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.ProviderPreset.OPENAI,
+            engine.detectProvider("sk-proj-dummyOpenAiKey00000000000000000", "https://api.openai.com/v1")
+        )
+
+        // Groq detection
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.ProviderPreset.GROQ,
+            engine.detectProvider("gsk_dummyGroqKey000000000000000000000", "https://api.groq.com/openai/v1")
+        )
+
+        // Ollama detection
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.ProviderPreset.OLLAMA,
+            engine.detectProvider("", "http://127.0.0.1:11434")
+        )
+    }
+
+    @Test
+    fun testProviderKeySanitizationAndMasking() {
+        val engine = com.jarvis.assistant.ai.orchestration.ProviderDiscoveryEngine()
+
+        val messyKey = "  \"sk-or-v1-mocktestdummy1234567890abcdef1234567890abcdef1234567890mock\"\n\t "
+        val cleaned = engine.sanitizeKey(messyKey)
+        assertEquals("sk-or-v1-mocktestdummy1234567890abcdef1234567890abcdef1234567890mock", cleaned)
+
+        val masked = engine.maskKey(cleaned)
+        assertTrue(masked.startsWith("sk-or-v1"))
+        assertTrue(masked.endsWith("mock"))
+        assertFalse(masked.contains("1234567890abcdef"))
+
+        val log = "Request failed for key sk-proj-dummytestkey99999999999999999999 with code 401"
+        val redacted = engine.redactSensitive(log)
+        assertFalse(redacted.contains("sk-proj-dummytestkey"))
+        assertTrue(redacted.contains("[REDACTED_API_KEY]"))
+    }
+
+    @Test
+    fun testFreeModelCategorization() {
+        val detector = com.jarvis.assistant.ai.orchestration.FreeModelDetectionEngine()
+
+        // 1. Ollama is Category A
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.FreeTierCategory.CATEGORY_A_VERIFIED_FREE,
+            detector.evaluatePricingCategory(com.jarvis.assistant.ai.orchestration.ProviderPreset.OLLAMA, "llama3.2", null, null)
+        )
+
+        // 2. OpenRouter :free tag is Category A
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.FreeTierCategory.CATEGORY_A_VERIFIED_FREE,
+            detector.evaluatePricingCategory(com.jarvis.assistant.ai.orchestration.ProviderPreset.OPENROUTER, "meta-llama/llama-3.3-70b-instruct:free", "0", "0")
+        )
+
+        // 3. OpenRouter non-free is Category D (Paid)
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.FreeTierCategory.CATEGORY_D_PAID,
+            detector.evaluatePricingCategory(com.jarvis.assistant.ai.orchestration.ProviderPreset.OPENROUTER, "anthropic/claude-3.5-sonnet", "0.003", "0.015")
+        )
+
+        // 4. Gemini official API has Category B (Free tier quota)
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.FreeTierCategory.CATEGORY_B_FREE_TIER_QUOTA,
+            detector.evaluatePricingCategory(com.jarvis.assistant.ai.orchestration.ProviderPreset.GEMINI, "gemini-1.5-flash", null, null)
+        )
+    }
+
+    @Test
+    fun testFreeModeOnlyStrictEnforcement() {
+        val detector = com.jarvis.assistant.ai.orchestration.FreeModelDetectionEngine()
+
+        val modelFree = com.jarvis.assistant.ai.orchestration.DiscoveredModel(
+            id = "m1",
+            providerId = "or",
+            modelIdentifier = "qwen/qwen-2.5-coder-32b-instruct:free",
+            displayName = "Qwen Free",
+            freeCategory = com.jarvis.assistant.ai.orchestration.FreeTierCategory.CATEGORY_A_VERIFIED_FREE.name
+        )
+
+        val modelPaid = com.jarvis.assistant.ai.orchestration.DiscoveredModel(
+            id = "m2",
+            providerId = "or",
+            modelIdentifier = "openai/gpt-4o",
+            displayName = "GPT-4o Paid",
+            freeCategory = com.jarvis.assistant.ai.orchestration.FreeTierCategory.CATEGORY_D_PAID.name
+        )
+
+        val modelUnknown = com.jarvis.assistant.ai.orchestration.DiscoveredModel(
+            id = "m3",
+            providerId = "custom",
+            modelIdentifier = "custom-llm",
+            displayName = "Custom Unknown",
+            freeCategory = com.jarvis.assistant.ai.orchestration.FreeTierCategory.CATEGORY_E_UNKNOWN.name
+        )
+
+        val allModels = listOf(modelFree, modelPaid, modelUnknown)
+
+        // In Free Mode Only = true: PAID and UNKNOWN are excluded!
+        val freeOnlyList = detector.filterEligibleModels(allModels, freeModeOnly = true)
+        assertEquals(1, freeOnlyList.size)
+        assertEquals("m1", freeOnlyList[0].id)
+
+        // In Free Mode Only = false: All available models permitted
+        val allAllowed = detector.filterEligibleModels(allModels, freeModeOnly = false)
+        assertEquals(3, allAllowed.size)
+    }
+
+    @Test
+    fun testTaskIntelligenceClassification14Categories() {
+        val classifier = com.jarvis.assistant.ai.orchestration.TaskIntelligenceClassifier()
+
+        // Android Development
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.TaskCategory.ANDROID_DEVELOPMENT,
+            classifier.classifyTask("How do I fix recomposition lag in Jetpack Compose LazyColumn in Kotlin?")
+        )
+
+        // Code Debugging
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.TaskCategory.CODE_DEBUGGING,
+            classifier.classifyTask("Here is a fatal error NullPointerException crash stacktrace in my app.")
+        )
+
+        // Programming
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.TaskCategory.PROGRAMMING,
+            classifier.classifyTask("```python\ndef solve(): pass\n``` Write an algorithm to find shortest path.")
+        )
+
+        // Terminal Assistance
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.TaskCategory.TERMINAL_ASSISTANCE,
+            classifier.classifyTask("Jarvis, pkg install python aur bash script run karo.")
+        )
+
+        // Complex Reasoning
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.TaskCategory.COMPLEX_REASONING,
+            classifier.classifyTask("Reason step by step to prove that the square root of 2 is irrational.")
+        )
+
+        // Image Understanding
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.TaskCategory.IMAGE_UNDERSTANDING,
+            classifier.classifyTask("What does this diagram show?", hasImage = true)
+        )
+
+        // General Conversation
+        assertEquals(
+            com.jarvis.assistant.ai.orchestration.TaskCategory.GENERAL_CONVERSATION,
+            classifier.classifyTask("Good morning, what's on the schedule today?")
+        )
+    }
+
+    @Test
+    fun testUsageQuotaManagerRateLimitHeaderParsing() {
+        val quotaManager = com.jarvis.assistant.ai.orchestration.UsageQuotaManager()
+
+        // Headers with remaining requests
+        val headersWithQuota = okhttp3.Headers.Builder()
+            .add("x-ratelimit-remaining-requests", "148")
+            .add("x-ratelimit-remaining-tokens", "99400")
+            .add("x-ratelimit-reset", "2")
+            .build()
+
+        val parsed = quotaManager.extractRateLimitInfo(headersWithQuota)
+        assertTrue(parsed.contains("148"))
+        assertTrue(parsed.contains("99400"))
+
+        // Headers without rate limit info -> must return "QUOTA UNKNOWN"
+        val emptyHeaders = okhttp3.Headers.Builder().build()
+        val emptyParsed = quotaManager.extractRateLimitInfo(emptyHeaders)
+        assertEquals("QUOTA UNKNOWN", emptyParsed)
+    }
+
+    @Test
+    fun testUsageQuotaManagerErrorClassification() {
+        val quotaManager = com.jarvis.assistant.ai.orchestration.UsageQuotaManager()
+
+        assertTrue(quotaManager.classifyError(401, "Invalid API Key").startsWith("AUTH_FAILURE"))
+        assertTrue(quotaManager.classifyError(404, "Model not found").startsWith("MODEL_UNAVAILABLE"))
+        assertTrue(quotaManager.classifyError(429, "Rate limit exceeded").startsWith("RATE_LIMIT_REACHED"))
+        assertTrue(quotaManager.classifyError(429, "Daily quota depleted").startsWith("DAILY_QUOTA_EXHAUSTED"))
+        assertTrue(quotaManager.classifyError(503, "Service unavailable").startsWith("TEMPORARY_SERVICE_FAILURE"))
+    }
+
+    @Test
+    fun testMultiAgentSystemSystemPrompts() {
+        val engine = com.jarvis.assistant.ai.orchestration.AutonomousRotationEngine()
+        val multiAgent = com.jarvis.assistant.ai.orchestration.AutonomousMultiAgentSystem(engine)
+
+        val corePrompt = multiAgent.getAgentSystemPrompt(com.jarvis.assistant.ai.orchestration.AgentType.CORE)
+        assertTrue(corePrompt.contains("JARVIS CORE"))
+
+        val coderPrompt = multiAgent.getAgentSystemPrompt(com.jarvis.assistant.ai.orchestration.AgentType.CODER)
+        assertTrue(coderPrompt.contains("JARVIS CODER"))
+        assertTrue(coderPrompt.contains("Jetpack Compose"))
+
+        val reviewerPrompt = multiAgent.getAgentSystemPrompt(com.jarvis.assistant.ai.orchestration.AgentType.REVIEWER)
+        assertTrue(reviewerPrompt.contains("JARVIS REVIEWER"))
+        assertTrue(reviewerPrompt.contains("Independent Quality Assurance"))
+    }
 }
+

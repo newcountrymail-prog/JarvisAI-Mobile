@@ -148,6 +148,7 @@ fun SettingsScreen(
     onOverlayConfigUpdated: (OverlayAvatarConfig) -> Unit,
     onClearChatHistory: () -> Unit,
     onNavigateGeminiDiagnostics: () -> Unit = {},
+    onNavigateAiControlCenter: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -283,6 +284,13 @@ fun SettingsScreen(
             SettingsSectionHeader("SYSTEM & DATA ENGINE")
 
             SettingsGroupCard {
+                SettingsRowItem(
+                    icon = Icons.Default.AutoAwesome,
+                    title = "AI Control Center (Multi-Model)",
+                    subtitle = "Universal API Manager, Free Model Library & Autonomous Routing",
+                    onClick = { onNavigateAiControlCenter() }
+                )
+                SettingsDivider()
                 SettingsRowItem(
                     icon = Icons.Default.PlayArrow,
                     title = "Gemini Live API & Diagnostics",

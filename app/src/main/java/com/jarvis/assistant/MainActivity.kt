@@ -57,6 +57,7 @@ import com.jarvis.assistant.ui.components.TaskHudOverlay
 import com.jarvis.assistant.ui.components.VoiceInteractionSheet
 import com.jarvis.assistant.data.model.OrbCustomizationConfig
 import com.jarvis.assistant.data.model.ProviderRole
+import com.jarvis.assistant.ui.screens.AiControlCenterScreen
 import com.jarvis.assistant.ui.screens.ChatScreen
 import com.jarvis.assistant.ui.screens.CodingWorkspaceScreen
 import com.jarvis.assistant.ui.screens.GeminiDiagnosticsScreen
@@ -473,11 +474,14 @@ class MainActivity : ComponentActivity() {
                                                 assistantState = AssistantState.IDLE
                                             }
                                             is JarvisIntent.GeneralAiConversation -> {
-                                                if (geminiApiKey.isBlank()) {
-                                                    val notice = "Gemini API key is not configured. Please open Settings & Intelligence (top right or bottom bar) and enter your Gemini API key to activate cloud neural intelligence. Device automation and local telemetry tools remain fully operational."
+                                                val hasConfiguredProvider = geminiApiKey.isNotBlank() ||
+                                                        app.universalOrchestrator.providers.value.any { it.isEnabled && (it.apiKey.isNotBlank() || it.authType == "NONE") }
+
+                                                if (!hasConfiguredProvider) {
+                                                    val notice = "No active AI provider is configured. Please open AI Control Center (via Toolbox or Settings) and enter an API credential (Gemini, OpenRouter, Qwen, Ollama, etc.) to activate multi-model intelligence."
                                                     app.chatRepository.addMessage(MessageSender.JARVIS, notice, mode = mode)
                                                     if (!silentExecution) {
-                                                        app.voiceEngine.speak("Gemini API key required for cloud generative intelligence. Please configure in settings.", personaConfig.speakingSpeed)
+                                                        app.voiceEngine.speak("AI provider required for cloud intelligence. Please configure in AI Control Center.", personaConfig.speakingSpeed)
                                                     }
                                                     isThinking = false
                                                     assistantState = AssistantState.IDLE
@@ -492,33 +496,24 @@ class MainActivity : ComponentActivity() {
                                                     val systemInstruction = PersonaPromptBuilder.buildSystemInstruction(userName, personaConfig, activeMemories)
                                                     val history = app.chatRepository.getMessagesFlow().firstOrNull() ?: emptyList()
 
-                                                    val sb = StringBuilder()
-                                                    val role = if (mode == ChatMode.CODE) ProviderRole.CODING else ProviderRole.GENERAL
-                                                    app.aiProviderManager.streamResponse(
+                                                    val orchResult = app.universalOrchestrator.executeChat(
                                                         prompt = text,
                                                         conversationHistory = history.takeLast(10),
-                                                        systemInstruction = systemInstruction,
-                                                        role = role
-                                                    ).collect { chunk ->
-                                                        isThinking = false
-                                                        assistantState = AssistantState.SPEAKING
-                                                        if (chunk.error != null) {
-                                                            sb.append("\n[Error: ${chunk.error}]")
-                                                            app.chatRepository.updateMessageStream(aiMsgId, sb.toString(), false)
-                                                        } else {
-                                                            sb.append(chunk.textDelta)
-                                                            app.chatRepository.updateMessageStream(aiMsgId, sb.toString(), !chunk.isComplete)
+                                                        systemInstruction = systemInstruction
+                                                    )
+
+                                                    isThinking = false
+                                                    if (orchResult.isSuccess) {
+                                                        app.chatRepository.updateMessageStream(aiMsgId, orchResult.responseText, false)
+                                                        if (!silentExecution) {
+                                                            val speakText = if (mode == ChatMode.CODE) "Code implementation prepared, Master." else orchResult.responseText.take(150)
+                                                            app.voiceEngine.speak(speakText, personaConfig.speakingSpeed)
                                                         }
-                                                        if (chunk.isComplete) {
-                                                            val finalContent = sb.toString().trim()
-                                                            app.chatRepository.updateMessageStream(aiMsgId, finalContent, false)
-                                                            if (!silentExecution) {
-                                                                val speakText = if (mode == ChatMode.CODE) "Code implementation prepared, Master." else finalContent.take(150)
-                                                                app.voiceEngine.speak(speakText, personaConfig.speakingSpeed)
-                                                            }
-                                                            assistantState = AssistantState.IDLE
-                                                        }
+                                                    } else {
+                                                        val errText = "Orchestration Error: ${orchResult.errorMessage ?: "Unable to complete request across eligible providers."}"
+                                                        app.chatRepository.updateMessageStream(aiMsgId, errText, false)
                                                     }
+                                                    assistantState = AssistantState.IDLE
                                                 }
                                             }
                                         }
@@ -622,7 +617,8 @@ class MainActivity : ComponentActivity() {
                                 onClearChatHistory = {
                                     scope.launch { app.chatRepository.clearHistory() }
                                 },
-                                onNavigateGeminiDiagnostics = { navController.navigate(NavDestination.GEMINI_DIAGNOSTICS.route) }
+                                onNavigateGeminiDiagnostics = { navController.navigate(NavDestination.GEMINI_DIAGNOSTICS.route) },
+                                onNavigateAiControlCenter = { navController.navigate(NavDestination.AI_CONTROL_CENTER.route) }
                             )
                         }
 
@@ -637,7 +633,8 @@ class MainActivity : ComponentActivity() {
                                 onNavigateSecurityLab = { navController.navigate(NavDestination.SECURITY_LAB.route) },
                                 onNavigateQwenCoder = { navController.navigate(NavDestination.QWEN_CODER.route) },
                                 onNavigateMemories = { navController.navigate(NavDestination.SETTINGS.route) },
-                                onNavigateGeminiDiagnostics = { navController.navigate(NavDestination.GEMINI_DIAGNOSTICS.route) }
+                                onNavigateGeminiDiagnostics = { navController.navigate(NavDestination.GEMINI_DIAGNOSTICS.route) },
+                                onNavigateAiControlCenter = { navController.navigate(NavDestination.AI_CONTROL_CENTER.route) }
                             )
                         }
 
@@ -666,6 +663,13 @@ class MainActivity : ComponentActivity() {
                             GeminiDiagnosticsScreen(
                                 engine = app.geminiAutoConfigEngine,
                                 provider = app.geminiAiProvider,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(NavDestination.AI_CONTROL_CENTER.route) {
+                            AiControlCenterScreen(
+                                orchestrator = app.universalOrchestrator,
                                 onNavigateBack = { navController.popBackStack() }
                             )
                         }

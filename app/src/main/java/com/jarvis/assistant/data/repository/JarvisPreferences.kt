@@ -88,6 +88,21 @@ class JarvisPreferences(private val context: Context) {
         val KEY_OVERLAY_SIZE = intPreferencesKey("overlay_size")
         val KEY_OVERLAY_OPACITY = floatPreferencesKey("overlay_opacity")
         val KEY_OVERLAY_DOCK = stringPreferencesKey("overlay_dock")
+
+        // Universal AI Orchestrator
+        val KEY_ORCHESTRATION_PROVIDERS_JSON = stringPreferencesKey("orchestration_providers_json")
+        val KEY_ORCHESTRATION_MODELS_JSON = stringPreferencesKey("orchestration_models_json")
+        val KEY_FREE_MODE_ONLY = booleanPreferencesKey("orchestration_free_mode_only")
+        val KEY_AUTO_SWITCHING = booleanPreferencesKey("orchestration_auto_switching")
+        val KEY_AUTO_MODEL_SELECTION = booleanPreferencesKey("orchestration_auto_model_selection")
+        val KEY_AUTO_FREE_DISCOVERY = booleanPreferencesKey("orchestration_auto_free_discovery")
+        val KEY_CODING_OPTIMIZATION = booleanPreferencesKey("orchestration_coding_optimization")
+        val KEY_MULTI_AGENT_REVIEW = booleanPreferencesKey("orchestration_multi_agent_review")
+        val KEY_PAID_MODEL_ACCESS = booleanPreferencesKey("orchestration_paid_model_access")
+        val KEY_MAX_SPENDING_LIMIT = floatPreferencesKey("orchestration_max_spending_limit")
+        val KEY_MAX_RETRY_COUNT = intPreferencesKey("orchestration_max_retry_count")
+        val KEY_ORCHESTRATION_PRIMARY_PROVIDER = stringPreferencesKey("orchestration_primary_provider")
+        val KEY_ORCHESTRATION_BACKUP_PROVIDER = stringPreferencesKey("orchestration_backup_provider")
     }
 
     val userNameFlow: Flow<String> = context.dataStore.data.map { it[KEY_USER_NAME] ?: "Master" }
@@ -251,4 +266,34 @@ class JarvisPreferences(private val context: Context) {
         it[KEY_OVERLAY_OPACITY] = config.opacity
         it[KEY_OVERLAY_DOCK] = config.dockEdge.name
     }
+
+    // Orchestration Flows
+    val orchestrationProvidersJsonFlow: Flow<String> = context.dataStore.data.map { it[KEY_ORCHESTRATION_PROVIDERS_JSON] ?: "" }
+    val orchestrationModelsJsonFlow: Flow<String> = context.dataStore.data.map { it[KEY_ORCHESTRATION_MODELS_JSON] ?: "" }
+    val freeModeOnlyFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_FREE_MODE_ONLY] ?: false }
+    val autoSwitchingFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_SWITCHING] ?: true }
+    val autoModelSelectionFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_MODEL_SELECTION] ?: true }
+    val autoFreeDiscoveryFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_FREE_DISCOVERY] ?: true }
+    val codingOptimizationFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_CODING_OPTIMIZATION] ?: true }
+    val multiAgentReviewFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_MULTI_AGENT_REVIEW] ?: false }
+    val paidModelAccessFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_PAID_MODEL_ACCESS] ?: true }
+    val maxSpendingLimitFlow: Flow<Double> = context.dataStore.data.map { (it[KEY_MAX_SPENDING_LIMIT] ?: 10.0f).toDouble() }
+    val maxRetryCountFlow: Flow<Int> = context.dataStore.data.map { it[KEY_MAX_RETRY_COUNT] ?: 3 }
+    val orchestrationPrimaryProviderFlow: Flow<String> = context.dataStore.data.map { it[KEY_ORCHESTRATION_PRIMARY_PROVIDER] ?: "gemini" }
+    val orchestrationBackupProviderFlow: Flow<String> = context.dataStore.data.map { it[KEY_ORCHESTRATION_BACKUP_PROVIDER] ?: "openrouter" }
+
+    // Orchestration Setters
+    suspend fun setOrchestrationProvidersJson(json: String) = context.dataStore.edit { it[KEY_ORCHESTRATION_PROVIDERS_JSON] = json }
+    suspend fun setOrchestrationModelsJson(json: String) = context.dataStore.edit { it[KEY_ORCHESTRATION_MODELS_JSON] = json }
+    suspend fun setFreeModeOnly(enabled: Boolean) = context.dataStore.edit { it[KEY_FREE_MODE_ONLY] = enabled }
+    suspend fun setAutoSwitching(enabled: Boolean) = context.dataStore.edit { it[KEY_AUTO_SWITCHING] = enabled }
+    suspend fun setAutoModelSelection(enabled: Boolean) = context.dataStore.edit { it[KEY_AUTO_MODEL_SELECTION] = enabled }
+    suspend fun setAutoFreeDiscovery(enabled: Boolean) = context.dataStore.edit { it[KEY_AUTO_FREE_DISCOVERY] = enabled }
+    suspend fun setCodingOptimization(enabled: Boolean) = context.dataStore.edit { it[KEY_CODING_OPTIMIZATION] = enabled }
+    suspend fun setMultiAgentReview(enabled: Boolean) = context.dataStore.edit { it[KEY_MULTI_AGENT_REVIEW] = enabled }
+    suspend fun setPaidModelAccess(enabled: Boolean) = context.dataStore.edit { it[KEY_PAID_MODEL_ACCESS] = enabled }
+    suspend fun setMaxSpendingLimit(limit: Double) = context.dataStore.edit { it[KEY_MAX_SPENDING_LIMIT] = limit.toFloat() }
+    suspend fun setMaxRetryCount(count: Int) = context.dataStore.edit { it[KEY_MAX_RETRY_COUNT] = count }
+    suspend fun setOrchestrationPrimaryProvider(providerId: String) = context.dataStore.edit { it[KEY_ORCHESTRATION_PRIMARY_PROVIDER] = providerId }
+    suspend fun setOrchestrationBackupProvider(providerId: String) = context.dataStore.edit { it[KEY_ORCHESTRATION_BACKUP_PROVIDER] = providerId }
 }
