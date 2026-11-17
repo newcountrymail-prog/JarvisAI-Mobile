@@ -58,6 +58,8 @@ import com.jarvis.assistant.ui.components.FuturisticAiOrb
 import com.jarvis.assistant.ui.components.QuickAccessCards
 import com.jarvis.assistant.ui.components.WeatherCard
 import com.jarvis.assistant.ui.theme.SunsetBackground
+import com.jarvis.assistant.ui.theme.SunsetBackgroundSecondary
+import com.jarvis.assistant.ui.theme.SunsetBlue
 import com.jarvis.assistant.ui.theme.SunsetCardBackground
 import com.jarvis.assistant.ui.theme.SunsetCoral
 import com.jarvis.assistant.ui.theme.SunsetGreen
