@@ -299,4 +299,111 @@ class JarvisUnitTest {
         val reg2 = com.jarvis.assistant.terminal.ToolDiscoveryRegistry(null, null)
         assertTrue(reg2.getAllTools().isNotEmpty())
     }
+
+    @Test
+    fun testGeminiKeyValidator() {
+        val raw1 = "  AIzaSyD-1234567890abcdefABCDEF1234  \n"
+        assertEquals("AIzaSyD-1234567890abcdefABCDEF1234", com.jarvis.assistant.ai.gemini.GeminiKeyValidator.cleanKey(raw1))
+
+        val rawWithDoubleQuotes = "\"AIzaSyD-1234567890abcdefABCDEF1234\""
+        assertEquals("AIzaSyD-1234567890abcdefABCDEF1234", com.jarvis.assistant.ai.gemini.GeminiKeyValidator.cleanKey(rawWithDoubleQuotes))
+
+        val rawWithSingleQuotes = "'AIzaSyD-1234567890abcdefABCDEF1234'"
+        assertEquals("AIzaSyD-1234567890abcdefABCDEF1234", com.jarvis.assistant.ai.gemini.GeminiKeyValidator.cleanKey(rawWithSingleQuotes))
+
+        val rawWithSmartQuotes = "“AIzaSyD-1234567890abcdefABCDEF1234”"
+        assertEquals("AIzaSyD-1234567890abcdefABCDEF1234", com.jarvis.assistant.ai.gemini.GeminiKeyValidator.cleanKey(rawWithSmartQuotes))
+
+        val masked = com.jarvis.assistant.ai.gemini.GeminiKeyValidator.maskKey("AIzaSyD-1234567890abcdefABCDEF1234")
+        assertTrue(masked.startsWith("AIzaSy..."))
+        assertTrue(masked.endsWith("1234"))
+        assertFalse(masked.contains("abcdef"))
+
+        val redacted = com.jarvis.assistant.ai.gemini.GeminiKeyValidator.redactString(
+            "Connecting with key AIzaSyD-1234567890abcdefABCDEF1234 to endpoint",
+            "AIzaSyD-1234567890abcdefABCDEF1234"
+        )
+        assertFalse(redacted.contains("AIzaSyD-1234567890abcdefABCDEF1234"))
+        assertTrue(redacted.contains("AIzaSy...1234"))
+
+        assertTrue(com.jarvis.assistant.ai.gemini.GeminiKeyValidator.validateKeyFormat("AIzaSyD-1234567890abcdefABCDEF1234"))
+        assertFalse(com.jarvis.assistant.ai.gemini.GeminiKeyValidator.validateKeyFormat("short_key"))
+    }
+
+    @Test
+    fun testGeminiErrorDiagnoser() {
+        val err404 = com.jarvis.assistant.ai.gemini.GeminiErrorDiagnoser.diagnoseHttpError(
+            code = 404,
+            responseBody = "{\"error\":{\"message\":\"models/gemini-3.1-flash-live-preview is not found\"}}",
+            modelId = "gemini-3.1-flash-live-preview",
+            endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-live-preview:generateContent"
+        )
+        assertEquals("MODEL_NOT_FOUND", err404.errorCategory)
+        assertTrue(err404.isRecoverable)
+        assertNotNull(err404.suggestedAlternativeModel)
+
+        val err403 = com.jarvis.assistant.ai.gemini.GeminiErrorDiagnoser.diagnoseHttpError(
+            code = 403,
+            responseBody = "{\"error\":{\"message\":\"Generative Language API has not been used in project 123 before or it is disabled.\"}}",
+            modelId = "gemini-1.5-flash",
+            endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        )
+        assertEquals("API_NOT_ENABLED", err403.errorCategory)
+        assertFalse(err403.isRecoverable)
+        assertTrue(err403.suggestedCorrection.contains("Google Cloud Console"))
+
+        val err429 = com.jarvis.assistant.ai.gemini.GeminiErrorDiagnoser.diagnoseHttpError(
+            code = 429,
+            responseBody = "{\"error\":{\"message\":\"Resource has been exhausted (e.g. check quota).\"}}",
+            modelId = "gemini-1.5-flash",
+            endpoint = "generateContent"
+        )
+        assertEquals("RATE_LIMIT_EXCEEDED", err429.errorCategory)
+
+        val dnsEx = com.jarvis.assistant.ai.gemini.GeminiErrorDiagnoser.diagnoseException(
+            java.net.UnknownHostException("generativelanguage.googleapis.com"),
+            "gemini-1.5-flash",
+            "https://generativelanguage.googleapis.com"
+        )
+        assertEquals("DNS_OR_OFFLINE", dnsEx.errorCategory)
+        assertTrue(dnsEx.isRecoverable)
+    }
+
+    @Test
+    fun testGeminiModelSelectionAndResolution() {
+        val provider = com.jarvis.assistant.ai.GeminiAiProvider()
+        assertEquals("gemini-1.5-flash", provider.resolveModelIdentifier("gemini-3.1-flash-live-preview"))
+        assertEquals("gemini-1.5-flash", provider.resolveModelIdentifier(""))
+        assertEquals("gemini-2.0-flash", provider.resolveModelIdentifier("models/gemini-2.0-flash"))
+
+        val model1 = com.jarvis.assistant.ai.gemini.GeminiDiscoveredModel(
+            id = "gemini-1.5-pro",
+            rawResourceName = "models/gemini-1.5-pro",
+            displayName = "Gemini 1.5 Pro",
+            description = "Pro",
+            supportedGenerationMethods = listOf("generateContent"),
+            inputTokenLimit = 2000000,
+            outputTokenLimit = 8192,
+            category = com.jarvis.assistant.ai.gemini.ModelCapabilityCategory.REASONING,
+            compatibility = com.jarvis.assistant.ai.gemini.GeminiModelCompatibility.VERIFIED_WORKING,
+            latencyMs = 1200L
+        )
+        val model2 = com.jarvis.assistant.ai.gemini.GeminiDiscoveredModel(
+            id = "gemini-1.5-flash",
+            rawResourceName = "models/gemini-1.5-flash",
+            displayName = "Gemini 1.5 Flash",
+            description = "Flash",
+            supportedGenerationMethods = listOf("generateContent"),
+            inputTokenLimit = 1000000,
+            outputTokenLimit = 8192,
+            category = com.jarvis.assistant.ai.gemini.ModelCapabilityCategory.FAST_RESPONSE,
+            compatibility = com.jarvis.assistant.ai.gemini.GeminiModelCompatibility.VERIFIED_WORKING,
+            latencyMs = 450L
+        )
+
+        val verifiedList = listOf(model1, model2)
+        val best = com.jarvis.assistant.ai.gemini.GeminiAutoConfigEngine.selectBestModel(verifiedList, listOf(model1, model2))
+        assertEquals("gemini-1.5-flash", best.id)
+        assertEquals(com.jarvis.assistant.ai.gemini.ModelCapabilityCategory.FAST_RESPONSE, best.category)
+    }
 }

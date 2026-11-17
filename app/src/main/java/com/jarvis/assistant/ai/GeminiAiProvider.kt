@@ -1,8 +1,16 @@
 package com.jarvis.assistant.ai
 
+import com.jarvis.assistant.ai.gemini.GeminiAutoConfigEngine
+import com.jarvis.assistant.ai.gemini.GeminiCompatibilityTester
+import com.jarvis.assistant.ai.gemini.GeminiDiscoveredModel
+import com.jarvis.assistant.ai.gemini.GeminiErrorDiagnoser
+import com.jarvis.assistant.ai.gemini.GeminiKeyValidator
+import com.jarvis.assistant.ai.gemini.GeminiModelCompatibility
+import com.jarvis.assistant.ai.gemini.GeminiModelDiscovery
 import com.jarvis.assistant.data.model.ChatMessage
 import com.jarvis.assistant.data.model.MessageSender
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -21,7 +29,10 @@ class GeminiAiProvider(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+        .build(),
+    val autoConfigEngine: GeminiAutoConfigEngine? = null,
+    val modelDiscovery: GeminiModelDiscovery = GeminiModelDiscovery(client),
+    val compatibilityTester: GeminiCompatibilityTester = GeminiCompatibilityTester(client)
 ) : AiProvider {
 
     override val providerId: String = "google_gemini"
@@ -29,64 +40,38 @@ class GeminiAiProvider(
     override val defaultModel: String = "gemini-1.5-flash"
 
     override suspend fun listModels(apiKey: String): Result<List<ModelInfo>> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) {
+        val cleanedKey = GeminiKeyValidator.cleanKey(apiKey)
+        if (cleanedKey.isBlank()) {
             return@withContext Result.success(getCuratedDefaultModels())
         }
 
-        try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
-            val request = Request.Builder().url(url).get().build()
-            val response = client.newCall(request).execute()
-            val responseString = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
+        val discoveryResult = modelDiscovery.discoverLiveModels(cleanedKey)
+        if (discoveryResult.isSuccess) {
+            val discoveredList = discoveryResult.getOrThrow()
+            if (discoveredList.isEmpty()) {
                 return@withContext Result.success(getCuratedDefaultModels())
             }
+            val modelInfoList = discoveredList.map { dm ->
+                val caps = mutableSetOf(AiCapability.GENERAL, AiCapability.STREAMING)
+                if (dm.inputTokenLimit >= 128000) caps.add(AiCapability.LONG_CONTEXT)
+                if (dm.id.contains("pro") || dm.id.contains("thinking")) caps.add(AiCapability.REASONING)
+                if (dm.id.contains("flash")) caps.add(AiCapability.FAST)
+                if (dm.id.contains("code") || dm.id.contains("pro")) caps.add(AiCapability.CODING)
 
-            val root = JSONObject(responseString)
-            val modelsArray = root.optJSONArray("models") ?: JSONArray()
-            val result = mutableListOf<ModelInfo>()
-
-            for (i in 0 until modelsArray.length()) {
-                val item = modelsArray.getJSONObject(i)
-                val rawName = item.optString("name", "") // e.g. "models/gemini-1.5-flash"
-                val id = rawName.removePrefix("models/")
-                val displayName = item.optString("displayName", id)
-                val desc = item.optString("description", "")
-                val inputLimit = item.optInt("inputTokenLimit", 1048576)
-                val supportedMethods = item.optJSONArray("supportedGenerationMethods") ?: JSONArray()
-
-                var supportsGenerate = false
-                for (j in 0 until supportedMethods.length()) {
-                    if (supportedMethods.getString(j) == "generateContent") {
-                        supportsGenerate = true
-                        break
-                    }
-                }
-
-                if (supportsGenerate && id.contains("gemini")) {
-                    val caps = mutableSetOf(AiCapability.GENERAL, AiCapability.STREAMING)
-                    if (inputLimit >= 128000) caps.add(AiCapability.LONG_CONTEXT)
-                    if (id.contains("pro") || id.contains("thinking")) caps.add(AiCapability.REASONING)
-                    if (id.contains("flash")) caps.add(AiCapability.FAST)
-                    if (id.contains("coder") || id.contains("pro")) caps.add(AiCapability.CODING)
-
-                    result.add(
-                        ModelInfo(
-                            id = id,
-                            name = displayName,
-                            description = desc,
-                            contextLength = inputLimit,
-                            isFree = true,
-                            capabilities = caps
-                        )
-                    )
-                }
+                ModelInfo(
+                    id = dm.id,
+                    name = dm.displayName,
+                    description = dm.description,
+                    contextLength = dm.inputTokenLimit,
+                    isFree = true,
+                    capabilities = caps
+                )
             }
-
-            if (result.isEmpty()) Result.success(getCuratedDefaultModels()) else Result.success(result)
-        } catch (e: Exception) {
-            Result.success(getCuratedDefaultModels())
+            Result.success(modelInfoList)
+        } else {
+            // Forward real discovery error if caller needs it
+            val ex = discoveryResult.exceptionOrNull()
+            Result.failure(ex ?: Exception("Failed to discover Gemini models from Google API."))
         }
     }
 
@@ -101,28 +86,20 @@ class GeminiAiProvider(
                 capabilities = setOf(AiCapability.GENERAL, AiCapability.FAST, AiCapability.STREAMING, AiCapability.LONG_CONTEXT)
             ),
             ModelInfo(
+                id = "gemini-2.0-flash",
+                name = "Gemini 2.0 Flash",
+                description = "Next-generation high-efficiency model with real-time speed.",
+                contextLength = 1048576,
+                isFree = true,
+                capabilities = setOf(AiCapability.GENERAL, AiCapability.FAST, AiCapability.STREAMING)
+            ),
+            ModelInfo(
                 id = "gemini-1.5-pro",
                 name = "Gemini 1.5 Pro",
                 description = "Highly capable reasoning model for complex architecture and coding.",
                 contextLength = 2097152,
                 isFree = false,
                 capabilities = setOf(AiCapability.GENERAL, AiCapability.REASONING, AiCapability.CODING, AiCapability.LONG_CONTEXT)
-            ),
-            ModelInfo(
-                id = "gemini-2.0-flash",
-                name = "Gemini 2.0 Flash",
-                description = "Next-gen high efficiency model with advanced real-time performance.",
-                contextLength = 1048576,
-                isFree = true,
-                capabilities = setOf(AiCapability.GENERAL, AiCapability.FAST, AiCapability.STREAMING)
-            ),
-            ModelInfo(
-                id = "gemini-3.1-flash-live-preview",
-                name = "Gemini Live Realtime",
-                description = "Low-latency voice & conversational streaming model.",
-                contextLength = 128000,
-                isFree = true,
-                capabilities = setOf(AiCapability.GENERAL, AiCapability.FAST, AiCapability.STREAMING)
             )
         )
     }
@@ -135,26 +112,72 @@ class GeminiAiProvider(
         apiKey: String
     ): Result<AiResponse> = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
-        if (apiKey.isBlank()) {
+        val cleanedKey = GeminiKeyValidator.cleanKey(apiKey)
+        if (cleanedKey.isBlank()) {
             return@withContext Result.failure(
-                IllegalStateException("Gemini API key is required. Configure your API key in Settings ➔ AI Providers.")
+                IllegalStateException("Gemini API key is required. Please configure your key in Settings ➔ Gemini Live API.")
             )
         }
 
+        var activeModel = resolveModelIdentifier(model)
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$activeModel:generateContent"
+
+        val jsonBody = buildRequestBody(prompt, conversationHistory, systemInstruction)
+        val requestBody = jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val request = Request.Builder()
+            .url("$endpoint?key=$cleanedKey")
+            .addHeader("x-goog-api-key", cleanedKey)
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody)
+            .build()
+
         try {
-            val resolvedModel = resolveModelIdentifier(model)
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:generateContent?key=$apiKey"
-
-            val jsonBody = buildRequestBody(prompt, conversationHistory, systemInstruction)
-            val requestBody = jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-
-            val request = Request.Builder().url(url).post(requestBody).build()
             val response = client.newCall(request).execute()
             val responseString = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(response.code, responseString)
-                return@withContext Result.failure(Exception(errorMsg))
+                // If model is not found (404), attempt intelligent self-repair
+                if (response.code == 404 && autoConfigEngine != null) {
+                    val repairResult = autoConfigEngine.autoRepairModel(cleanedKey, activeModel)
+                    if (repairResult.isSuccess) {
+                        val newModel = repairResult.getOrThrow()
+                        activeModel = newModel
+                        // Retry once with newly repaired model
+                        val retryEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/$activeModel:generateContent"
+                        val retryRequest = Request.Builder()
+                            .url("$retryEndpoint?key=$cleanedKey")
+                            .addHeader("x-goog-api-key", cleanedKey)
+                            .addHeader("Content-Type", "application/json")
+                            .post(requestBody)
+                            .build()
+                        val retryResponse = client.newCall(retryRequest).execute()
+                        val retryBody = retryResponse.body?.string() ?: ""
+                        if (retryResponse.isSuccessful) {
+                            val root = JSONObject(retryBody)
+                            val text = extractTextFromResponse(root)
+                            val usage = extractUsageMetadata(root)
+                            return@withContext Result.success(
+                                AiResponse(
+                                    text = text,
+                                    model = activeModel,
+                                    providerId = providerId,
+                                    usage = usage,
+                                    isSuccess = true,
+                                    latencyMs = System.currentTimeMillis() - startTime
+                                )
+                            )
+                        }
+                    }
+                }
+
+                val diagnosis = GeminiErrorDiagnoser.diagnoseHttpError(
+                    code = response.code,
+                    responseBody = responseString,
+                    modelId = activeModel,
+                    endpoint = endpoint
+                )
+                return@withContext Result.failure(Exception("${diagnosis.errorCategory} (${response.code}): ${diagnosis.googleErrorMessage} [Fix: ${diagnosis.suggestedCorrection}]"))
             }
 
             val root = JSONObject(responseString)
@@ -164,7 +187,7 @@ class GeminiAiProvider(
             Result.success(
                 AiResponse(
                     text = text,
-                    model = resolvedModel,
+                    model = activeModel,
                     providerId = providerId,
                     usage = usage,
                     isSuccess = true,
@@ -172,7 +195,8 @@ class GeminiAiProvider(
                 )
             )
         } catch (e: Exception) {
-            Result.failure(Exception("Gemini Communication Error: ${e.localizedMessage ?: "Unknown error"}"))
+            val diagnosis = GeminiErrorDiagnoser.diagnoseException(e, activeModel, endpoint)
+            Result.failure(Exception("${diagnosis.errorCategory}: ${diagnosis.googleErrorMessage} [Fix: ${diagnosis.suggestedCorrection}]"))
         }
     }
 
@@ -183,29 +207,58 @@ class GeminiAiProvider(
         model: String,
         apiKey: String
     ): Flow<AiStreamChunk> = flow {
-        if (apiKey.isBlank()) {
+        val cleanedKey = GeminiKeyValidator.cleanKey(apiKey)
+        if (cleanedKey.isBlank()) {
             emit(AiStreamChunk(textDelta = "", isComplete = true, error = "Gemini API key is required."))
             return@flow
         }
 
-        val resolvedModel = resolveModelIdentifier(model)
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:streamGenerateContent?alt=sse&key=$apiKey"
+        var activeModel = resolveModelIdentifier(model)
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$activeModel:streamGenerateContent?alt=sse&key=$cleanedKey"
         val jsonBody = buildRequestBody(prompt, conversationHistory, systemInstruction)
         val requestBody = jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
 
-        val request = Request.Builder().url(url).post(requestBody).build()
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("x-goog-api-key", cleanedKey)
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody)
+            .build()
 
         try {
-            val response = client.newCall(request).execute()
+            var response = client.newCall(request).execute()
             if (!response.isSuccessful) {
-                val err = parseErrorMessage(response.code, response.body?.string() ?: "")
-                emit(AiStreamChunk(textDelta = "", isComplete = true, error = err))
+                // If 404 and auto-repair available, attempt once
+                if (response.code == 404 && autoConfigEngine != null) {
+                    val repair = autoConfigEngine.autoRepairModel(cleanedKey, activeModel)
+                    if (repair.isSuccess) {
+                        activeModel = repair.getOrThrow()
+                        val retryUrl = "https://generativelanguage.googleapis.com/v1beta/models/$activeModel:streamGenerateContent?alt=sse&key=$cleanedKey"
+                        val retryReq = Request.Builder()
+                            .url(retryUrl)
+                            .addHeader("x-goog-api-key", cleanedKey)
+                            .addHeader("Content-Type", "application/json")
+                            .post(requestBody)
+                            .build()
+                        response = client.newCall(retryReq).execute()
+                    }
+                }
+            }
+
+            if (!response.isSuccessful) {
+                val diagnosis = GeminiErrorDiagnoser.diagnoseHttpError(
+                    code = response.code,
+                    responseBody = response.body?.string() ?: "",
+                    modelId = activeModel,
+                    endpoint = url
+                )
+                emit(AiStreamChunk(textDelta = "", isComplete = true, error = "${diagnosis.errorCategory} (${response.code}): ${diagnosis.googleErrorMessage}"))
                 return@flow
             }
 
             val inputStream = response.body?.byteStream()
             if (inputStream == null) {
-                emit(AiStreamChunk(textDelta = "", isComplete = true, error = "Empty stream response."))
+                emit(AiStreamChunk(textDelta = "", isComplete = true, error = "Empty stream response from Gemini API."))
                 return@flow
             }
 
@@ -229,60 +282,60 @@ class GeminiAiProvider(
             }
             emit(AiStreamChunk(textDelta = "", isComplete = true))
         } catch (e: Exception) {
-            emit(AiStreamChunk(textDelta = "", isComplete = true, error = e.localizedMessage ?: "Stream error"))
+            val diagnosis = GeminiErrorDiagnoser.diagnoseException(e, activeModel, url)
+            emit(AiStreamChunk(textDelta = "", isComplete = true, error = "${diagnosis.errorCategory}: ${diagnosis.googleErrorMessage}"))
         }
     }.flowOn(Dispatchers.IO)
 
     override suspend fun testConnection(model: String, apiKey: String): Result<ConnectionTestResult> = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
-        if (apiKey.isBlank()) {
-            return@withContext Result.failure(IllegalStateException("API key is empty."))
+        val cleanedKey = GeminiKeyValidator.cleanKey(apiKey)
+        if (cleanedKey.isBlank()) {
+            return@withContext Result.failure(IllegalStateException("API key is empty. Enter a valid Google AI Studio key."))
         }
 
         try {
-            val modelsResult = listModels(apiKey)
-            val discoveredCount = modelsResult.getOrNull()?.size ?: 0
-
             val resolvedModel = resolveModelIdentifier(model)
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:generateContent?key=$apiKey"
+            val dummyModel = GeminiDiscoveredModel(
+                id = resolvedModel,
+                rawResourceName = "models/$resolvedModel",
+                displayName = resolvedModel,
+                description = "Connection probe",
+                supportedGenerationMethods = listOf("generateContent"),
+                inputTokenLimit = 1048576,
+                outputTokenLimit = 8192
+            )
 
-            val testPayload = JSONObject().apply {
-                put("contents", JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("parts", JSONArray().apply {
-                            put(JSONObject().apply { put("text", "JARVIS connection test. Return 'ONLINE'.") })
-                        })
-                    })
-                })
-            }
-
-            val requestBody = testPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-            val request = Request.Builder().url(url).post(requestBody).build()
-            val response = client.newCall(request).execute()
+            val tested = compatibilityTester.testSingleModel(dummyModel, cleanedKey)
             val duration = System.currentTimeMillis() - startTime
 
-            if (response.isSuccessful) {
+            if (tested.compatibility == GeminiModelCompatibility.VERIFIED_WORKING) {
                 Result.success(
                     ConnectionTestResult(
                         isSuccessful = true,
-                        latencyMs = duration,
-                        message = "HTTP 200 OK — Connected to Google Generative Language ($resolvedModel).",
+                        latencyMs = tested.latencyMs.takeIf { it > 0 } ?: duration,
+                        message = "HTTP 200 OK — Handshake Verified with Google Generative Language ($resolvedModel).",
                         activeModel = resolvedModel,
-                        discoveredModelsCount = discoveredCount
+                        discoveredModelsCount = 1
                     )
                 )
             } else {
-                val err = parseErrorMessage(response.code, response.body?.string() ?: "")
-                Result.failure(Exception(err))
+                val errMsg = tested.lastErrorMessage ?: "Handshake failed without specific error message."
+                Result.failure(Exception("Connection verification failed: $errMsg"))
             }
         } catch (e: Exception) {
-            Result.failure(Exception("Connection handshake failed: ${e.localizedMessage ?: "Network unreachable"}"))
+            Result.failure(Exception("Connection handshake exception: ${e.localizedMessage ?: "Network unreachable"}"))
         }
     }
 
-    private fun resolveModelIdentifier(model: String): String {
-        return model.trim().removePrefix("models/").ifBlank { defaultModel }
+    fun resolveModelIdentifier(model: String): String {
+        val cleaned = model.trim().removePrefix("models/").ifBlank { defaultModel }
+        // Replace known non-existent or deprecated placeholders with stable flash model
+        return if (cleaned.contains("gemini-3.1-flash", ignoreCase = true) || cleaned.isBlank()) {
+            defaultModel
+        } else {
+            cleaned
+        }
     }
 
     private fun buildRequestBody(
@@ -346,22 +399,5 @@ class GeminiAiProvider(
             candidateTokens = usage.optInt("candidatesTokenCount", 0),
             totalTokens = usage.optInt("totalTokenCount", 0)
         )
-    }
-
-    private fun parseErrorMessage(code: Int, body: String): String {
-        val serverMsg = try {
-            JSONObject(body).optJSONObject("error")?.optString("message", "") ?: ""
-        } catch (_: Exception) { "" }
-
-        val detail = if (serverMsg.isNotBlank()) " Detail: $serverMsg" else ""
-
-        return when (code) {
-            400 -> "HTTP 400 Bad Request: Invalid model parameters or unsupported prompt structure.$detail"
-            401, 403 -> "HTTP $code Unauthorized/Forbidden: API key is invalid or restricted for this Google AI Studio project.$detail"
-            404 -> "HTTP 404 Model Not Found: The requested model identifier is unavailable.$detail"
-            429 -> "HTTP 429 Quota Exceeded: Model rate limits or quota exhausted for this API key.$detail"
-            500, 503 -> "HTTP $code Service Unavailable: Google Generative AI backend temporarily offline.$detail"
-            else -> "HTTP $code Error: Request failed.$detail"
-        }
     }
 }

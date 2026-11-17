@@ -59,6 +59,7 @@ import com.jarvis.assistant.data.model.OrbCustomizationConfig
 import com.jarvis.assistant.data.model.ProviderRole
 import com.jarvis.assistant.ui.screens.ChatScreen
 import com.jarvis.assistant.ui.screens.CodingWorkspaceScreen
+import com.jarvis.assistant.ui.screens.GeminiDiagnosticsScreen
 import com.jarvis.assistant.ui.screens.HomeScreen
 import com.jarvis.assistant.ui.screens.SecurityLabScreen
 import com.jarvis.assistant.ui.screens.SettingsScreen
@@ -94,8 +95,9 @@ class MainActivity : ComponentActivity() {
             val jarvisPro by app.preferences.jarvisProFlow.collectAsState(initial = true)
             val silentExecution by app.preferences.silentExecutionFlow.collectAsState(initial = false)
             val currentLanguage by app.preferences.languageFlow.collectAsState(initial = "Hinglish")
-            val geminiModel by app.preferences.geminiModelFlow.collectAsState(initial = "gemini-3.1-flash-live-preview")
+            val geminiModel by app.preferences.geminiModelFlow.collectAsState(initial = "gemini-1.5-flash")
             val geminiApiKey by app.preferences.geminiApiKeyFlow.collectAsState(initial = "")
+            val geminiConfigState by app.geminiAutoConfigEngine.engineState.collectAsState()
             val themePreset by app.preferences.themeFlow.collectAsState(initial = ThemePreset.SUNSET)
             val personaConfig by app.preferences.personaFlow.collectAsState(initial = com.jarvis.assistant.data.model.AiPersonaConfig())
             val overlayConfig by app.preferences.overlayConfigFlow.collectAsState(initial = com.jarvis.assistant.data.model.OverlayAvatarConfig())
@@ -340,6 +342,7 @@ class MainActivity : ComponentActivity() {
                                 currentLanguage = currentLanguage,
                                 audioAmplitude = audioAmplitude,
                                 orbConfig = orbConfig,
+                                geminiStatus = geminiConfigState.status,
                                 onPowerToggle = {
                                     if (assistantState == AssistantState.OFFLINE) {
                                         assistantState = AssistantState.IDLE
@@ -618,7 +621,8 @@ class MainActivity : ComponentActivity() {
                                 onOverlayConfigUpdated = { newOverlay -> scope.launch { app.preferences.updateOverlayConfig(newOverlay) } },
                                 onClearChatHistory = {
                                     scope.launch { app.chatRepository.clearHistory() }
-                                }
+                                },
+                                onNavigateGeminiDiagnostics = { navController.navigate(NavDestination.GEMINI_DIAGNOSTICS.route) }
                             )
                         }
 
@@ -632,7 +636,8 @@ class MainActivity : ComponentActivity() {
                                 onNavigateTerminal = { navController.navigate(NavDestination.TERMINAL.route) },
                                 onNavigateSecurityLab = { navController.navigate(NavDestination.SECURITY_LAB.route) },
                                 onNavigateQwenCoder = { navController.navigate(NavDestination.QWEN_CODER.route) },
-                                onNavigateMemories = { navController.navigate(NavDestination.SETTINGS.route) }
+                                onNavigateMemories = { navController.navigate(NavDestination.SETTINGS.route) },
+                                onNavigateGeminiDiagnostics = { navController.navigate(NavDestination.GEMINI_DIAGNOSTICS.route) }
                             )
                         }
 
@@ -653,6 +658,14 @@ class MainActivity : ComponentActivity() {
                         composable(NavDestination.QWEN_CODER.route) {
                             CodingWorkspaceScreen(
                                 aiProviderManager = app.aiProviderManager,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(NavDestination.GEMINI_DIAGNOSTICS.route) {
+                            GeminiDiagnosticsScreen(
+                                engine = app.geminiAutoConfigEngine,
+                                provider = app.geminiAiProvider,
                                 onNavigateBack = { navController.popBackStack() }
                             )
                         }

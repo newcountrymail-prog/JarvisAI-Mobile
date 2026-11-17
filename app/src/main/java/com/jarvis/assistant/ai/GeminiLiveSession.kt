@@ -18,6 +18,8 @@ import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+import com.jarvis.assistant.ai.gemini.GeminiKeyValidator
+
 class GeminiLiveSession(
     private val context: Context,
     private val scope: CoroutineScope
@@ -36,13 +38,15 @@ class GeminiLiveSession(
         .build()
 
     fun connect(apiKey: String, model: String = "gemini-1.5-flash") {
-        if (apiKey.isBlank()) {
+        val cleanedKey = GeminiKeyValidator.cleanKey(apiKey)
+        if (cleanedKey.isBlank()) {
             onError?.invoke("Gemini API key is required to establish Live WebSocket stream.")
             return
         }
 
+        val cleanModel = model.trim().removePrefix("models/").ifBlank { "gemini-1.5-flash" }
         // Gemini Live Realtime Bidi WebSocket endpoint
-        val url = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=$apiKey"
+        val url = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=$cleanedKey"
         val request = Request.Builder().url(url).build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -53,7 +57,7 @@ class GeminiLiveSession(
                 // Send setup handshake configuration
                 val setupJson = JSONObject().apply {
                     put("setup", JSONObject().apply {
-                        put("model", "models/$model")
+                        put("model", "models/$cleanModel")
                         put("generationConfig", JSONObject().apply {
                             put("responseModalities", "TEXT")
                         })

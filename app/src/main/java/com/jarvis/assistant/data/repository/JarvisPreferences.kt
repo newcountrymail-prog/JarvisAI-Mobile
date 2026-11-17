@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.jarvis.assistant.data.model.AiPersonaConfig
@@ -18,6 +19,7 @@ import com.jarvis.assistant.data.model.OverlayAvatarConfig
 import com.jarvis.assistant.data.model.PersonalityType
 import com.jarvis.assistant.data.model.ThemePreset
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "jarvis_preferences")
@@ -43,6 +45,11 @@ class JarvisPreferences(private val context: Context) {
         // 1. Google Gemini
         val KEY_GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val KEY_GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val KEY_GEMINI_STATUS = stringPreferencesKey("gemini_connection_status")
+        val KEY_GEMINI_MASKED_KEY = stringPreferencesKey("gemini_masked_key")
+        val KEY_GEMINI_LAST_LATENCY = longPreferencesKey("gemini_last_latency_ms")
+        val KEY_GEMINI_LAST_VERIFIED = longPreferencesKey("gemini_last_verified_timestamp")
+        val KEY_GEMINI_COMPATIBLE_MODELS = stringPreferencesKey("gemini_compatible_models_json")
 
         // 2. OpenRouter
         val KEY_OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
@@ -101,6 +108,11 @@ class JarvisPreferences(private val context: Context) {
     // Gemini
     val geminiModelFlow: Flow<String> = context.dataStore.data.map { it[KEY_GEMINI_MODEL] ?: "gemini-1.5-flash" }
     val geminiApiKeyFlow: Flow<String> = context.dataStore.data.map { it[KEY_GEMINI_API_KEY] ?: "" }
+    val geminiStatusFlow: Flow<String> = context.dataStore.data.map { it[KEY_GEMINI_STATUS] ?: "DISCONNECTED" }
+    val geminiMaskedKeyFlow: Flow<String> = context.dataStore.data.map { it[KEY_GEMINI_MASKED_KEY] ?: "" }
+    val geminiLastLatencyFlow: Flow<Long> = context.dataStore.data.map { it[KEY_GEMINI_LAST_LATENCY] ?: 0L }
+    val geminiLastVerifiedFlow: Flow<Long> = context.dataStore.data.map { it[KEY_GEMINI_LAST_VERIFIED] ?: 0L }
+    val geminiCompatibleModelsJsonFlow: Flow<String> = context.dataStore.data.map { it[KEY_GEMINI_COMPATIBLE_MODELS] ?: "" }
 
     // OpenRouter
     val openRouterApiKeyFlow: Flow<String> = context.dataStore.data.map { it[KEY_OPENROUTER_API_KEY] ?: "" }
@@ -175,6 +187,29 @@ class JarvisPreferences(private val context: Context) {
     // Gemini
     suspend fun setGeminiModel(model: String) = context.dataStore.edit { it[KEY_GEMINI_MODEL] = model }
     suspend fun setGeminiApiKey(key: String) = context.dataStore.edit { it[KEY_GEMINI_API_KEY] = key }
+    suspend fun setGeminiStatus(status: String) = context.dataStore.edit { it[KEY_GEMINI_STATUS] = status }
+    suspend fun setGeminiMaskedKey(maskedKey: String) = context.dataStore.edit { it[KEY_GEMINI_MASKED_KEY] = maskedKey }
+    suspend fun setGeminiLastLatency(latencyMs: Long) = context.dataStore.edit { it[KEY_GEMINI_LAST_LATENCY] = latencyMs }
+    suspend fun setGeminiLastVerified(timestamp: Long) = context.dataStore.edit { it[KEY_GEMINI_LAST_VERIFIED] = timestamp }
+    suspend fun setGeminiCompatibleModelsJson(json: String) = context.dataStore.edit { it[KEY_GEMINI_COMPATIBLE_MODELS] = json }
+
+    suspend fun getGeminiApiKeySync(): String = geminiApiKeyFlow.first()
+    suspend fun getGeminiModelSync(): String = geminiModelFlow.first()
+    suspend fun getGeminiStatusSync(): String = geminiStatusFlow.first()
+    suspend fun getGeminiMaskedKeySync(): String = geminiMaskedKeyFlow.first()
+    suspend fun getGeminiLastLatencySync(): Long = geminiLastLatencyFlow.first()
+    suspend fun getGeminiLastVerifiedSync(): Long = geminiLastVerifiedFlow.first()
+    suspend fun getGeminiCompatibleModelsJsonSync(): String = geminiCompatibleModelsJsonFlow.first()
+
+    suspend fun clearGeminiConfig() = context.dataStore.edit {
+        it.remove(KEY_GEMINI_API_KEY)
+        it.remove(KEY_GEMINI_STATUS)
+        it.remove(KEY_GEMINI_MASKED_KEY)
+        it.remove(KEY_GEMINI_LAST_LATENCY)
+        it.remove(KEY_GEMINI_LAST_VERIFIED)
+        it.remove(KEY_GEMINI_COMPATIBLE_MODELS)
+        it[KEY_GEMINI_MODEL] = "gemini-1.5-flash"
+    }
 
     // OpenRouter
     suspend fun setOpenRouterApiKey(key: String) = context.dataStore.edit { it[KEY_OPENROUTER_API_KEY] = key }

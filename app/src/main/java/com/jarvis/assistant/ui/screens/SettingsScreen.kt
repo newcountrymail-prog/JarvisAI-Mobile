@@ -147,6 +147,7 @@ fun SettingsScreen(
     onThemeUpdated: (ThemePreset) -> Unit,
     onOverlayConfigUpdated: (OverlayAvatarConfig) -> Unit,
     onClearChatHistory: () -> Unit,
+    onNavigateGeminiDiagnostics: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -284,9 +285,9 @@ fun SettingsScreen(
             SettingsGroupCard {
                 SettingsRowItem(
                     icon = Icons.Default.PlayArrow,
-                    title = "Gemini Live API & Model",
-                    subtitle = "$geminiModel • Live WebSocket",
-                    onClick = { showGeminiModal = true }
+                    title = "Gemini Live API & Diagnostics",
+                    subtitle = "$geminiModel • Universal Detection & Repair",
+                    onClick = { onNavigateGeminiDiagnostics() }
                 )
                 SettingsDivider()
                 SettingsRowItem(

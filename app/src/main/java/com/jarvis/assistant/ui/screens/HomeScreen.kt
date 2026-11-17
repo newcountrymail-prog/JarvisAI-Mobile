@@ -82,6 +82,7 @@ fun HomeScreen(
     onRequestScreenShare: () -> Unit,
     audioAmplitude: Float = 0f,
     orbConfig: com.jarvis.assistant.data.model.OrbCustomizationConfig = com.jarvis.assistant.data.model.OrbCustomizationConfig(),
+    geminiStatus: com.jarvis.assistant.ai.gemini.GeminiConnectionStatus = com.jarvis.assistant.ai.gemini.GeminiConnectionStatus.DISCONNECTED,
     modifier: Modifier = Modifier
 ) {
     var showLanguageModal by remember { mutableStateOf(false) }
@@ -250,7 +251,47 @@ fun HomeScreen(
                 fontSize = 11.sp
             )
 
-            Spacer(modifier = Modifier.height(26.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // ==========================================
+            // ACTUAL AI PROVIDER CONNECTION BADGE
+            // Mandatory Section 11 Requirement
+            // ==========================================
+            val geminiBadgeColor = when (geminiStatus) {
+                com.jarvis.assistant.ai.gemini.GeminiConnectionStatus.CONNECTED -> SunsetGreen
+                com.jarvis.assistant.ai.gemini.GeminiConnectionStatus.UNVERIFIED -> Color(0xFFD97706)
+                com.jarvis.assistant.ai.gemini.GeminiConnectionStatus.DISCONNECTED -> Color(0xFFDC2626)
+                com.jarvis.assistant.ai.gemini.GeminiConnectionStatus.TESTING -> SunsetBlue
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(SunsetCardBackground)
+                    .border(1.dp, geminiBadgeColor.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .clickable(onClick = onNavigateSettings)
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(geminiBadgeColor)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = geminiStatus.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = geminiBadgeColor,
+                        fontSize = 10.5.sp,
+                        letterSpacing = 0.4.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
 
             // ==========================================
             // LIVE WEATHER CARD

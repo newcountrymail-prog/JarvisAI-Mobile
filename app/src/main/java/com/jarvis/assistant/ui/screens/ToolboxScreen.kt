@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DisplaySettings
 import androidx.compose.material.icons.filled.Memory
@@ -65,6 +66,7 @@ fun ToolboxScreen(
     onNavigateSecurityLab: () -> Unit,
     onNavigateQwenCoder: () -> Unit,
     onNavigateMemories: () -> Unit,
+    onNavigateGeminiDiagnostics: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -113,6 +115,16 @@ fun ToolboxScreen(
                 fontSize = 11.sp,
                 letterSpacing = 1.sp
             )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            ToolLaunchCard(
+                title = "Gemini Engine Diagnostics",
+                subtitle = "Universal detection, model compatibility testing & self-repair",
+                icon = Icons.Default.Bolt,
+                accentColor = Color(0xFFF16D43),
+                onClick = onNavigateGeminiDiagnostics
+            )
+
             Spacer(modifier = Modifier.height(10.dp))
 
             ToolLaunchCard(

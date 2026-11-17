@@ -20,9 +20,11 @@ import com.jarvis.assistant.terminal.AutonomousCommandPlanner
 import com.jarvis.assistant.terminal.TerminalExecutionEngine
 import com.jarvis.assistant.terminal.TermuxBridge
 import com.jarvis.assistant.terminal.ToolDiscoveryRegistry
+import com.jarvis.assistant.ai.gemini.GeminiAutoConfigEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class JarvisApp : Application() {
 
@@ -47,6 +49,9 @@ class JarvisApp : Application() {
         private set
 
     lateinit var voiceEngine: JarvisVoiceEngine
+        private set
+
+    lateinit var geminiAutoConfigEngine: GeminiAutoConfigEngine
         private set
 
     lateinit var geminiAiProvider: GeminiAiProvider
@@ -97,8 +102,12 @@ class JarvisApp : Application() {
         automationController = DeviceAutomationController(this)
         voiceEngine = JarvisVoiceEngine(this)
 
-        // Multi-AI Providers
-        geminiAiProvider = GeminiAiProvider()
+        // Multi-AI Providers & Gemini Auto-Config Engine
+        geminiAutoConfigEngine = GeminiAutoConfigEngine(preferences)
+        geminiAiProvider = GeminiAiProvider(autoConfigEngine = geminiAutoConfigEngine)
+        applicationScope.launch {
+            geminiAutoConfigEngine.restoreSavedState()
+        }
         openRouterProvider = OpenRouterAiProvider()
         qwenAiProvider = QwenAiProvider()
         customAiProvider = CustomOpenAiProvider()

@@ -57,6 +57,7 @@ enum class NavDestination(val route: String, val label: String) {
     TERMINAL("terminal", "Termux"),
     SECURITY_LAB("security_lab", "Security Lab"),
     QWEN_CODER("qwen_coder", "Qwen Coder"),
+    GEMINI_DIAGNOSTICS("gemini_diagnostics", "Gemini Diagnostics"),
     UPDATES("updates", "Updates")
 }
 
