@@ -30,6 +30,14 @@ val SunsetBlue = Color(0xFF8295AD)
 val SunsetGreen = Color(0xFF28AE86)
 val SunsetBorder = Color(0xFFD9C7C4)
 
+// Universal Color Aliases for Screen UI
+val PrimaryBackground = SunsetBackground
+val SecondaryBackground = SunsetBackgroundSecondary
+val CardBackground = SunsetCardBackground
+val PrimaryText = SunsetTextPrimary
+val SecondaryText = SunsetTextSecondary
+val CardBorder = SunsetBorder
+
 // Gradient stops: Peach -> Cream -> Soft Pink
 val SunsetPeach = Color(0xFFFED6C4)
 val SunsetCream = Color(0xFFFFF0E9)
